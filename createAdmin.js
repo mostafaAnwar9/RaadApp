@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const Admin = require('./models/Admin');
 
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(process.env.MONGO_URI, {} )
   .then(async () => {
 
     const admin = new Admin({

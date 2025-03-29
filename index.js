@@ -1,7 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
-
 require('dotenv').config();
 console.log("🔍 MONGO_URI:", process.env.MONGO_URI);
 const cors = require('cors');
@@ -117,10 +116,8 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 });
 
 // ✅ اتصال بـ MongoDB
-mongoose.connect(process.env.MONGO_URI, { 
-    useNewUrlParser: true, 
-    useUnifiedTopology: true
-})
+mongoose.connect(process.env.MONGO_URI, { }
+)
 .then(() => console.log('✅ Connected to MongoDB'))
 .catch(err => console.error('❌ Error connecting to MongoDB:', err));
 
@@ -161,17 +158,6 @@ const userRoutes = require('./routes/users');
 console.log("✅ Route Loaded: /users");
 app.use('/users', userRoutes);
 
-app._router.stack.forEach((layer) => {
-    if (layer.route) {
-        console.log(`🛤️ Route: ${layer.route.path}`);
-    } else if (layer.name === 'router') {
-        layer.handle.stack.forEach((nestedLayer) => {
-            if (nestedLayer.route) {
-                console.log(`🛤️ Nested Route: ${Object.keys(layer.handle).join(', ')}/${nestedLayer.route.path}`);
-            }
-        });
-    }
-});
 
 // ✅ نقطة النهاية الرئيسية
 app.get('/', (req, res) => {
