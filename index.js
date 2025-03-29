@@ -11,7 +11,6 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const cloudinary = require("cloudinary").v2;
 const axios = require('axios');
 
-dotenv.config(); // 🟢 تحميل المتغيرات من .env
 
 const app = express();
 const PORT = process.env.PORT || 5000;
