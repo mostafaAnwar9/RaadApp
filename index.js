@@ -1,7 +1,9 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
+
 require('dotenv').config();
+console.log("🔍 MONGO_URI:", process.env.MONGO_URI);
 const cors = require('cors');
 const socketIo = require('socket.io');
 const http = require('http');
