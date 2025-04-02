@@ -1,5 +1,6 @@
 const express = require('express');
 const User = require('../models/User');
+const bcrypt = require('bcrypt');
 
 const router = express.Router();
 
@@ -12,6 +13,84 @@ router.get('/', async (req, res) => {
         res.status(200).json(users);
     } catch (error) {
         res.status(500).json({ message: "Server error" });
+    }
+});
+
+// جلب بيانات مستخدم معين
+router.get('/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ message: 'المستخدم غير موجود' });
+        }
+        res.status(200).json(user);
+    } catch (error) {
+        res.status(500).json({ message: 'حدث خطأ أثناء جلب بيانات المستخدم', error: error.message });
+    }
+});
+
+// Change password - This route must come before the general update route
+router.put('/:id/password', async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { oldPassword, newPassword } = req.body;
+
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ message: 'كلمة المرور القديمة والجديدة مطلوبة' });
+        }
+
+        // Find user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'المستخدم غير موجود' });
+        }
+
+        // Verify old password
+        const isPasswordValid = await bcrypt.compare(oldPassword, user.password);
+        if (!isPasswordValid) {
+            return res.status(400).json({ message: 'كلمة المرور الحالية غير صحيحة' });
+        }
+
+        // Hash and update new password
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(newPassword, salt);
+        await user.save();
+
+        res.status(200).json({ message: 'تم تغيير كلمة المرور بنجاح!' });
+    } catch (error) {
+        console.error("❌ Error changing password:", error);
+        res.status(500).json({ message: 'حدث خطأ أثناء تغيير كلمة المرور', error: error.message });
+    }
+});
+
+// Update user data (without password)
+router.put('/:id', async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { username, email, phonenumber } = req.body;
+
+        if (!username || !email || !phonenumber) {
+            return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
+        }
+
+        // Find user
+        let user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'المستخدم غير موجود' });
+        }
+
+        // Update user data
+        user.username = username;
+        user.email = email;
+        user.phonenumber = phonenumber;
+
+        // Save updates
+        await user.save();
+
+        res.status(200).json({ message: 'تم تحديث البيانات بنجاح!', user });
+    } catch (error) {
+        console.error("❌ Error updating user:", error);
+        res.status(500).json({ message: 'حدث خطأ أثناء تحديث البيانات', error: error.message });
     }
 });
 
@@ -34,59 +113,5 @@ router.put('/reject/:id', async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 });
-
-const bcrypt = require('bcrypt');
-
-router.put('/:id', async (req, res) => {
-    try {
-        const userId = req.params.id;
-        const { username, email, phonenumber, address, password } = req.body;
-
-        if (!username || !email || !phonenumber || !address) {
-            return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
-        }
-
-        // البحث عن المستخدم
-        let user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: 'المستخدم غير موجود' });
-        }
-
-        // تحديث البيانات
-        user.username = username;
-        user.email = email;
-        user.phonenumber = phonenumber;
-        user.address = address;
-
-        // تحديث الباسورد فقط لو المستخدم أدخل باسورد جديد
-        if (password && password.trim() !== '') {
-            const salt = await bcrypt.genSalt(10);
-            user.password = await bcrypt.hash(password, salt);
-        }
-
-        // حفظ التحديثات
-        await user.save();
-
-        res.status(200).json({ message: 'تم تحديث البيانات بنجاح!', user });
-    } catch (error) {
-        console.error("❌ Error updating user:", error);
-        res.status(500).json({ message: 'حدث خطأ أثناء تحديث البيانات', error: error.message });
-    }
-});
-
-
-// جلب بيانات مستخدم معين
-router.get('/:id', async (req, res) => {
-    try {
-        const user = await User.findById(req.params.id);
-        if (!user) {
-            return res.status(404).json({ message: 'المستخدم غير موجود' });
-        }
-        res.status(200).json(user);
-    } catch (error) {
-        res.status(500).json({ message: 'حدث خطأ أثناء جلب بيانات المستخدم', error: error.message });
-    }
-});
-
 
 module.exports = router;
