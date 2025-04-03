@@ -27,11 +27,9 @@ router.get('/', async (req, res) => {
 });
 
 // Get user's active orders (pending, accepted, preparing, ready)
-// Temporarily removed auth middleware for development
-router.get('/my-orders', async (req, res) => {
+router.get('/my-orders', auth, async (req, res) => {
     try {
-        // For development, get userId from query parameter or use a default
-        const userId = req.query.userId || req.user?._id;
+        const userId = req.user._id; // Get user ID from auth middleware
         
         console.log('🔍 Fetching orders for user:', userId);
         
@@ -49,11 +47,6 @@ router.get('/my-orders', async (req, res) => {
         
         console.log(`✅ Found ${orders.length} orders for user ${userId}`);
         
-        // Set CORS headers explicitly for this route
-        res.header('Access-Control-Allow-Origin', '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        
         res.status(200).json(orders);
     } catch (error) {
         console.error('❌ Error fetching user orders:', error);
@@ -62,8 +55,7 @@ router.get('/my-orders', async (req, res) => {
 });
 
 // Get order details by ID
-// Temporarily removed auth middleware for development
-router.get('/:orderId', async (req, res) => {
+router.get('/:orderId', auth, async (req, res) => {
     try {
         const orderId = req.params.orderId;
         
@@ -80,24 +72,11 @@ router.get('/:orderId', async (req, res) => {
             return res.status(404).json({ error: 'Order not found' });
         }
         
-        // Set CORS headers explicitly for this route
-        res.header('Access-Control-Allow-Origin', '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        
         res.status(200).json(order);
     } catch (error) {
         console.error('❌ Error fetching order details:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-});
-
-// Handle OPTIONS requests for CORS preflight
-router.options('*', (req, res) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.status(200).end();
 });
 
 router.get('/:storeId/pending', async (req, res) => {
