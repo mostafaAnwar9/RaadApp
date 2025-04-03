@@ -25,6 +25,55 @@ router.get('/', async (req, res) => {
     }
 });
 
+// Get user's active orders (pending, accepted, preparing, ready)
+router.get('/my-orders', async (req, res) => {
+    try {
+        const userId = req.user._id; // Assuming auth middleware sets req.user
+        
+        if (!userId) {
+            return res.status(400).json({ error: 'User ID is required' });
+        }
+        
+        const orders = await StoreOrder.find({
+            userId: userId,
+            status: { $in: ['pending', 'accepted', 'preparing', 'ready'] }
+        })
+        .populate('items.productId', 'name price imageUrl')
+        .populate('addressId')
+        .sort({ createdAt: -1 }); // Most recent first
+        
+        res.status(200).json(orders);
+    } catch (error) {
+        console.error('❌ Error fetching user orders:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Get order details by ID
+router.get('/:orderId', async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return res.status(400).json({ error: 'Invalid order ID' });
+        }
+        
+        const order = await StoreOrder.findById(orderId)
+            .populate('items.productId', 'name price imageUrl')
+            .populate('addressId')
+            .populate('storeId', 'name address');
+            
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        
+        res.status(200).json(order);
+    } catch (error) {
+        console.error('❌ Error fetching order details:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 router.get('/:storeId/pending', async (req, res) => {
     try {
         const storeId = req.params.storeId;
@@ -42,8 +91,32 @@ router.get('/:storeId/pending', async (req, res) => {
 router.put('/updateOrderStatus', async (req, res) => {
     try {
         const { orderId, status } = req.body;
-        await StoreOrder.findByIdAndUpdate(orderId, { status });
-        res.status(200).json({ success: true });
+        
+        if (!orderId || !status) {
+            return res.status(400).json({ error: 'Order ID and status are required' });
+        }
+        
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return res.status(400).json({ error: 'Invalid order ID' });
+        }
+        
+        const validStatuses = ['pending', 'accepted', 'preparing', 'ready', 'delivered', 'cancelled'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+        
+        const updatedOrder = await StoreOrder.findByIdAndUpdate(
+            orderId, 
+            { status },
+            { new: true }
+        ).populate('items.productId', 'name price imageUrl')
+         .populate('addressId');
+        
+        if (!updatedOrder) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        
+        res.status(200).json(updatedOrder);
     } catch (error) {
         console.error('❌ Error updating order status:', error);
         res.status(500).json({ error: 'Internal Server Error' });
