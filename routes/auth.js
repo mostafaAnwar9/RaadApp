@@ -65,19 +65,43 @@ router.post('/register', [
     }
 });
 
+// Handle preflight requests for login
+router.options('/login', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.status(204).end();
+});
+
 router.post('/login', async (req, res) => {
+    console.log('🔍 Login attempt:', { email: req.body.email });
+    
+    // Set CORS headers for the login route
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+
     const { email, password } = req.body;
 
     try {
         const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ message: "User not found. Please check your email or sign up." });
+        if (!user) {
+            console.log('❌ User not found:', email);
+            return res.status(404).json({ message: "User not found. Please check your email or sign up." });
+        }
 
         if (user.role === 'delivery' && user.status === 'pending') {
+            console.log('⚠️ Delivery account pending:', email);
             return res.status(403).json({ message: 'Your delivery account is pending approval.' });
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({ message: "Incorrect password. Please try again." });
+        if (!isMatch) {
+            console.log('❌ Invalid password for user:', email);
+            return res.status(400).json({ message: "Incorrect password. Please try again." });
+        }
 
         const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
@@ -99,18 +123,18 @@ router.post('/login', async (req, res) => {
             if (store) {
                 responseData.store_id = store._id; // ✅ إضافة store_id إلى الاستجابة
             } else {
+                console.log('⚠️ No store found for owner:', email);
                 return res.status(404).json({ message: "No store found for this owner." });
             }
         }
 
+        console.log('✅ Login successful for user:', email);
         res.json(responseData);
     } catch (err) {
-        console.error(err);
+        console.error('❌ Login error:', err);
         res.status(500).json({ message: "An error occurred. Please try again later." });
     }
 });
-
-
 
 module.exports = router;
 module.exports.verifyToken = verifyToken;
