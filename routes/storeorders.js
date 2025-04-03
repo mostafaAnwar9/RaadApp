@@ -8,6 +8,7 @@ const Store = require('../models/Store');
 const { v4: uuidv4 } = require('uuid');
 const mongoose = require('mongoose');
 const Address = require('../models/Address');
+const auth = require('../middleware/auth');
 
 //const WebSocket = require('ws');
 
@@ -26,9 +27,11 @@ router.get('/', async (req, res) => {
 });
 
 // Get user's active orders (pending, accepted, preparing, ready)
-router.get('/my-orders', async (req, res) => {
+router.get('/my-orders', auth, async (req, res) => {
     try {
-        const userId = req.user._id; // Assuming auth middleware sets req.user
+        const userId = req.user._id; // Get user ID from auth middleware
+        
+        console.log('🔍 Fetching orders for user:', userId);
         
         if (!userId) {
             return res.status(400).json({ error: 'User ID is required' });
@@ -42,6 +45,8 @@ router.get('/my-orders', async (req, res) => {
         .populate('addressId')
         .sort({ createdAt: -1 }); // Most recent first
         
+        console.log(`✅ Found ${orders.length} orders for user ${userId}`);
+        
         res.status(200).json(orders);
     } catch (error) {
         console.error('❌ Error fetching user orders:', error);
@@ -50,7 +55,7 @@ router.get('/my-orders', async (req, res) => {
 });
 
 // Get order details by ID
-router.get('/:orderId', async (req, res) => {
+router.get('/:orderId', auth, async (req, res) => {
     try {
         const orderId = req.params.orderId;
         
