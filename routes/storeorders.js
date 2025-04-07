@@ -41,21 +41,44 @@ router.get('/', async (req, res) => {
 });
 
 // Get user's active orders (pending, accepted, preparing, ready)
-// Temporarily removed auth middleware for development
 router.get('/my-orders', async (req, res) => {
     try {
         // For development, get userId from query parameter or use a default
-        const userId = req.query.userId || req.user?._id;
+        const userId = req.query.userId;
         
         console.log('🔍 Fetching orders for user:', userId);
         
         if (!userId) {
-            return res.status(400).json({ error: 'User ID is required' });
+            console.log('❌ No user ID provided in request');
+            return res.status(400).json({ 
+                error: 'User ID is required',
+                message: 'Please provide a valid user ID in the query parameters'
+            });
         }
+        
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            console.log('❌ Invalid user ID format:', userId);
+            return res.status(400).json({ 
+                error: 'Invalid User ID',
+                message: 'The provided user ID is not in a valid format'
+            });
+        }
+        
+        // Verify user exists
+        const user = await User.findById(userId);
+        if (!user) {
+            console.log('❌ User not found:', userId);
+            return res.status(404).json({ 
+                error: 'User Not Found',
+                message: 'No user found with the provided ID'
+            });
+        }
+        
+        console.log('✅ Found user:', user.username);
         
         const orders = await StoreOrder.find({
             userId: userId,
-            status: { $in: ['pending', 'accepted', 'preparing', 'ready'] }
+            status: { $in: ['pending', 'accepted', 'preparing', 'ready', 'rejected'] }
         })
         .populate('items.productId', 'name price imageUrl')
         .populate('addressId')
@@ -71,7 +94,11 @@ router.get('/my-orders', async (req, res) => {
         res.status(200).json(orders);
     } catch (error) {
         console.error('❌ Error fetching user orders:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ 
+            error: 'Internal Server Error',
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 
@@ -140,7 +167,7 @@ router.put('/updateOrderStatus', async (req, res) => {
             return res.status(400).json({ error: 'Invalid order ID' });
         }
         
-        const validStatuses = ['pending', 'accepted', 'preparing', 'ready', 'delivered', 'cancelled'];
+        const validStatuses = ['pending', 'accepted', 'preparing', 'ready', 'delivered', 'rejected'];
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: 'Invalid status' });
         }

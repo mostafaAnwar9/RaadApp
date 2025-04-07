@@ -218,4 +218,25 @@ router.get('/all', async (req, res) => {
     }
 });
 
+router.get('/store/:storeId', async (req, res) => {
+    try {
+        const { storeId } = req.params;
+
+        if (!ObjectId.isValid(storeId)) {
+            return res.status(400).json({ error: 'Invalid store ID' });
+        }
+
+        const store = await Store.findById(storeId);
+        
+        if (!store) {
+            return res.status(404).json({ error: 'Store not found' });
+        }
+
+        res.status(200).json(store);
+    } catch (error) {
+        console.error('Error fetching store:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 module.exports = router;

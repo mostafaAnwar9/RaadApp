@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const Store = require('../models/Store'); 
+const whatsappService = require('../services/whatsapp_service');
 
 
 const router = express.Router();
@@ -42,42 +43,76 @@ const verifyToken = async (req, res, next) => {
 };
 
 // ✅ تسجيل مستخدم جديد
-router.post('/register', [
-    body('email').isEmail().withMessage('Please provide a valid email address').custom(async (value) => {
-        const user = await User.findOne({ email: value });
-        if (user) throw new Error('Email already exists');
-        return true;
-    }),
-    body('password').isLength({ min: 8 }).matches(/\d/).matches(/[a-zA-Z]/),
-    body('username').custom(async (value) => {
-        const user = await User.findOne({ username: value });
-        if (user) throw new Error('Username already exists');
-        return true;
-    }),
-    body('role').isIn(['customer', 'delivery', 'admin']),
-    body('phonenumber').optional().isLength({ min: 11, max: 11 }).withMessage('Phone number must be 11 digits').isNumeric().withMessage('Phone number must be numeric')
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ message: errors.array().map(err => err.msg).join(', ') });
-
-    const { email, password, username, role, phonenumber } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    try {
-        const newUser = new User({
-            email,
-            password: hashedPassword,
-            username,
-            role,
-            status: role === 'delivery' ? 'pending' : 'approved',
-            phonenumber
-        });
-        await newUser.save();
-        res.status(201).json({ message: 'Registration successful', user: { username, email, role, status: newUser.status } });
-
-    } catch (error) {
-        res.status(500).json({ message: 'There was an error with registration. Please try again later.' });
+router.post('/register', async (req, res) => {
+  try {
+    const { email, password, username, role, phonenumber, otpId, otp } = req.body;
+    
+    console.log('Registration attempt:', { email, username, role, phonenumber, otpId, otp });
+    
+    // Verify OTP
+    const otpResult = await whatsappService.verifyOTP(otpId, otp);
+    console.log('OTP verification result:', otpResult);
+    
+    if (!otpResult.success) {
+      return res.status(400).json({ message: otpResult.message });
     }
+    
+    // Use the phone number as provided by the user
+    const phoneNumber = otpResult.phoneNumber;
+    
+    // Create user object
+    const user = new User({
+      email,
+      password,
+      username,
+      role,
+      phonenumber: phoneNumber,
+      phoneVerified: true
+    });
+    
+    console.log('Creating user with data:', user);
+    
+    try {
+      await user.save();
+      console.log('User saved successfully');
+      
+      // Generate JWT token
+      const token = jwt.sign(
+        { userId: user._id, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      
+      res.status(201).json({
+        message: 'User registered successfully',
+        token,
+        user: {
+          id: user._id,
+          email: user.email,
+          username: user.username,
+          role: user.role,
+          phonenumber: user.phonenumber
+        }
+      });
+    } catch (saveError) {
+      console.error('Error saving user:', saveError);
+      
+      // Handle duplicate key errors
+      if (saveError.code === 11000) {
+        if (saveError.keyPattern.phonenumber) {
+          return res.status(400).json({ message: 'Phone number already registered' });
+        }
+        if (saveError.keyPattern.username) {
+          return res.status(400).json({ message: 'Username already taken' });
+        }
+      }
+      
+      throw saveError;
+    }
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ message: 'Error registering user: ' + error.message });
+  }
 });
 
 // Handle preflight requests for login
@@ -90,64 +125,92 @@ router.options('/login', (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-    console.log('🔍 Login attempt:', { email: req.body.email });
+  try {
+    const { phonenumber, password } = req.body;
     
-    // Set CORS headers for the login route
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
+    console.log('Login attempt for phone number:', phonenumber);
+    
+    // Find user by phone number
+    const user = await User.findOne({ phonenumber });
+    
+    if (!user) {
+      console.log('User not found for phone number:', phonenumber);
+      return res.status(401).json({ message: 'Invalid phone number or password' });
+    }
+    
+    // Verify password
+    const isValidPassword = await user.comparePassword(password);
+    
+    if (!isValidPassword) {
+      console.log('Invalid password for user:', user._id);
+      return res.status(401).json({ message: 'Invalid phone number or password' });
+    }
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    console.log('User logged in successfully:', user._id);
+    
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        phonenumber: user.phonenumber
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Error logging in: ' + error.message });
+  }
+});
 
-    const { email, password } = req.body;
-
+// Email verification endpoint
+router.post('/verify-email', async (req, res) => {
+    const { userId, token } = req.body;
+    
+    if (!userId || !token) {
+        return res.status(400).json({ message: "User ID and verification token are required" });
+    }
+    
     try {
-        const user = await User.findOne({ email });
+        // In a real implementation, you would verify the token against a stored token
+        // For this example, we'll just update the user's emailVerified status
+        
+        const user = await User.findById(userId);
         if (!user) {
-            console.log('❌ User not found:', email);
-            return res.status(404).json({ message: "User not found. Please check your email or sign up." });
+            return res.status(404).json({ message: "User not found" });
         }
-
-        if (user.role === 'delivery' && user.status === 'pending') {
-            console.log('⚠️ Delivery account pending:', email);
-            return res.status(403).json({ message: 'Your delivery account is pending approval.' });
+        
+        if (!user.email) {
+            return res.status(400).json({ message: "User does not have an email to verify" });
         }
-
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            console.log('❌ Invalid password for user:', email);
-            return res.status(400).json({ message: "Incorrect password. Please try again." });
-        }
-
-        const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-        // ✅ تجهيز البيانات التي سيتم إرجاعها
-        const responseData = {
-            _id: user._id,
-            token,
-            role: user.role,
-            status: user.status,
-            username: user.username,
-            phoneNumber: user.phonenumber,
-          };          
-
-        if (user.role === 'owner') {
-            responseData.ownerId = user._id;
-
-            // ✅ البحث عن المتجر المرتبط بهذا المالك
-            const store = await Store.findOne({ ownerId: user._id });
-            if (store) {
-                responseData.store_id = store._id; // ✅ إضافة store_id إلى الاستجابة
-            } else {
-                console.log('⚠️ No store found for owner:', email);
-                return res.status(404).json({ message: "No store found for this owner." });
+        
+        // In a real implementation, you would verify the token here
+        // For now, we'll just mark the email as verified
+        
+        user.emailVerified = true;
+        await user.save();
+        
+        res.status(200).json({ 
+            message: "Email verified successfully",
+            user: {
+                _id: user._id,
+                username: user.username,
+                email: user.email,
+                emailVerified: user.emailVerified
             }
-        }
-
-        console.log('✅ Login successful for user:', email);
-        res.json(responseData);
-    } catch (err) {
-        console.error('❌ Login error:', err);
-        res.status(500).json({ message: "An error occurred. Please try again later." });
+        });
+    } catch (error) {
+        console.error("❌ Error verifying email:", error);
+        res.status(500).json({ message: "An error occurred while verifying email" });
     }
 });
 

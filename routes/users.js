@@ -69,8 +69,8 @@ router.put('/:id', async (req, res) => {
         const userId = req.params.id;
         const { username, email, phonenumber } = req.body;
 
-        if (!username || !email || !phonenumber) {
-            return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
+        if (!username || !phonenumber) {
+            return res.status(400).json({ message: 'Username and phone number are required' });
         }
 
         // Find user
@@ -79,9 +79,23 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ message: 'المستخدم غير موجود' });
         }
 
+        // Check if email is being updated and if it's already in use
+        if (email && email !== user.email) {
+            const existingUser = await User.findOne({ email });
+            if (existingUser && existingUser._id.toString() !== userId) {
+                return res.status(400).json({ message: 'Email is already in use by another user' });
+            }
+        }
+
         // Update user data
         user.username = username;
-        user.email = email;
+        if (email !== undefined) {
+            user.email = email || null;
+            // If email is being added or changed, set emailVerified to false
+            if (email && email !== user.email) {
+                user.emailVerified = false;
+            }
+        }
         user.phonenumber = phonenumber;
 
         // Save updates

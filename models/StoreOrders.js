@@ -18,7 +18,7 @@ const storeOrderSchema = new mongoose.Schema({
   orderTotal: { type: Number, required: true }, // المجموع النهائي (المنتجات + التوصيل)
   status: { 
     type: String, 
-    enum: ['pending', 'accepted', 'rejected', 'delivered'],
+    enum: ['pending', 'accepted', 'preparing', 'ready', 'delivered', 'rejected'],
     default: 'pending' 
   },
   paymentMethod: { 
