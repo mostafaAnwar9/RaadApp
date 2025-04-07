@@ -124,18 +124,23 @@ class WhatsAppService {
         return { success: false, message: 'WhatsApp service not connected. Please scan the QR code in the terminal.' };
       }
 
-      // Use the phone number as provided by the user
+      // Format phone number for WhatsApp
       let formattedNumber = phoneNumber;
       
       // Remove any non-digit characters
       formattedNumber = formattedNumber.replace(/\D/g, '');
       
-      // If the number starts with 0, remove it
+      // If it starts with 002, remove it and keep the rest
+      if (formattedNumber.startsWith('002')) {
+        formattedNumber = formattedNumber.substring(3);
+      }
+      
+      // If it starts with 0, remove it
       if (formattedNumber.startsWith('0')) {
         formattedNumber = formattedNumber.substring(1);
       }
       
-      // Add country code if not present
+      // Add country code if needed
       if (!formattedNumber.startsWith('20')) {
         formattedNumber = '20' + formattedNumber;
       }
@@ -145,11 +150,14 @@ class WhatsAppService {
       // Generate OTP
       const otp = this.generateOTP();
       const otpId = uuidv4();
+
+      // Format the phone number to 00201282863776 format
+      let storedPhoneNumber = '0020' + formattedNumber.substring(2);
       
       // Store OTP with 5 minutes expiration
       this.otpStore.set(otpId, {
         otp,
-        phoneNumber: phoneNumber, // Store the original phone number
+        phoneNumber: storedPhoneNumber, // Store with 0020 prefix
         originalPhoneNumber: phoneNumber, // Store the original format for verification
         expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
       });
@@ -229,10 +237,10 @@ class WhatsAppService {
 
     console.log('OTP verified successfully for ID:', otpId);
     
-    // Return the original phone number
+    // Return the phone number in the correct format (00201282863776)
     return {
       success: true,
-      phoneNumber: storedData.phoneNumber,
+      phoneNumber: storedData.phoneNumber, // Already in 00201282863776 format
       originalPhoneNumber: storedData.originalPhoneNumber,
       message: 'OTP verified successfully'
     };

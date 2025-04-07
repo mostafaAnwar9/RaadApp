@@ -1,97 +1,81 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    unique: true,
-    sparse: true,
-    trim: true,
-    lowercase: true,
-    validate: {
-      validator: function(v) {
-        return !v || /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
-      },
-      message: props => `${props.value} is not a valid email address!`
-    }
+  email: { 
+    type: String, 
+    required: false, 
+    default: null,
+    set: v => v === '' ? null : v  // Convert empty string to null
   },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6
-  },
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    minlength: 3
-  },
-  role: {
-    type: String,
-    enum: ['user', 'owner', 'delivery'],
-    default: 'user'
-  },
+  emailVerified: { type: Boolean, default: false },
+  phoneVerified: { type: Boolean, default: false },
+  password: { type: String, required: true },
+  username: { type: String, required: true, unique: true },
   phonenumber: {
     type: String,
     required: true,
     unique: true,
-    trim: true,
-    validate: {
+    validate: { 
       validator: function(v) {
-        // Accept any phone number format as long as it's at least 10 digits
-        return /^\d{10,}$/.test(v);
+        // Accept any phone number with at least 10 digits
+        const cleanNumber = v.replace(/\D/g, '');
+        const isValid = cleanNumber.length >= 10;
+        console.log(`Validating phone number: ${v}, isValid: ${isValid}`);
+        return isValid;
       },
-      message: props => `${props.value} is not a valid phone number! Must be at least 10 digits.`
-    }
+      message: props => `Phone number '${props.value}' is invalid. It must have at least 10 digits.`
+    },
   },
-  phoneVerified: {
-    type: Boolean,
-    default: false
+  role: { 
+    type: String, 
+    enum: ['customer', 'delivery', 'admin', 'owner'],
+    required: true 
   },
-  emailVerified: {
-    type: Boolean,
-    default: false
+  status: { 
+    type: String, 
+    enum: ['pending', 'approved', 'rejected'], 
+    default: 'pending'
   },
-  status: {
-    type: String,
-    enum: ['active', 'pending', 'suspended'],
-    default: 'active'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  createdAt: { type: Date, default: Date.now }
 });
 
-// Hash password before saving
-userSchema.pre('save', async function(next) {
-  try {
-    if (!this.isModified('password')) {
-      return next();
+// Add a pre-save middleware to log validation errors
+userSchema.pre('save', function(next) {
+  const errors = this.validateSync();
+  if (errors) {
+    console.error('Validation errors:', errors);
+  }
+  next();
+});
+
+// Add a pre-save middleware to format the phone number
+userSchema.pre('save', function(next) {
+  // Only format if the phone number is provided
+  if (this.phonenumber) {
+    let formattedNumber = this.phonenumber;
+    
+    // Remove any non-digit characters
+    formattedNumber = formattedNumber.replace(/\D/g, '');
+    
+    // If it starts with 002, keep it as is
+    if (formattedNumber.startsWith('002')) {
+      // Do nothing, already in the correct format
+    } 
+    // If it starts with 0, replace with 0020
+    else if (formattedNumber.startsWith('0')) {
+      formattedNumber = '0020' + formattedNumber.substring(1);
+    } 
+    // If it starts with 20, add 00 prefix
+    else if (formattedNumber.startsWith('20')) {
+      formattedNumber = '00' + formattedNumber;
+    }
+    // If it doesn't start with any of the above, add 0020
+    else {
+      formattedNumber = '0020' + formattedNumber;
     }
     
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Compare password method
-userSchema.methods.comparePassword = async function(candidatePassword) {
-  try {
-    return await bcrypt.compare(candidatePassword, this.password);
-  } catch (error) {
-    throw error;
-  }
-};
-
-// Log validation errors
-userSchema.pre('save', function(next) {
-  if (this.isModified('phonenumber')) {
-    console.log('Validating phone number:', this.phonenumber);
+    console.log('Formatted phone number in pre-save middleware:', formattedNumber);
+    this.phonenumber = formattedNumber;
   }
   next();
 });
