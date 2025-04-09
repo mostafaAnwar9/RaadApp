@@ -189,7 +189,12 @@ app.use('/otp', otpRoutes);
 // Add WhatsApp routes
 const whatsappRoutes = require('./routes/whatsapp');
 console.log("✅ Route Loaded: /whatsapp");
-app.use('/api/whatsapp', whatsappRoutes);
+app.use('/whatsapp', whatsappRoutes);
+
+// Add Email routes
+const emailRoutes = require('./routes/email');
+console.log("✅ Route Loaded: /email");
+app.use('/email', emailRoutes);
 
 // ✅ نقطة النهاية الرئيسية
 app.get('/', (req, res) => {

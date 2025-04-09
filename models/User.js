@@ -16,6 +16,7 @@ const userSchema = new mongoose.Schema({
     unique: true,
     validate: { validator: (v) => /^\d{11}$/.test(v) },
   },
+  phoneVerified: { type: Boolean, default: false },
   role: { 
     type: String, 
     enum: ['customer', 'delivery', 'admin', 'owner'],

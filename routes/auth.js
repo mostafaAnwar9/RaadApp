@@ -101,7 +101,8 @@ router.post('/register', [
             role,
             status: role === 'delivery' ? 'pending' : 'approved',
             phonenumber,
-            emailVerified: false
+            emailVerified: false,
+            phoneVerified: false
         };
 
         // Only add email if it's provided and not empty
@@ -122,7 +123,9 @@ router.post('/register', [
                 email: userObj.email || null, 
                 role, 
                 status: newUser.status,
-                emailVerified: newUser.emailVerified
+                emailVerified: newUser.emailVerified,
+                phonenumber: newUser.phonenumber,
+                phoneVerified: newUser.phoneVerified
             } 
         });
     } catch (error) {
