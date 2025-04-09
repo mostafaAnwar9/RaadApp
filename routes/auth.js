@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const Store = require('../models/Store'); 
+const whatsappService = require('../services/whatsapp_service');
 
 
 const router = express.Router();
@@ -42,6 +43,7 @@ const verifyToken = async (req, res, next) => {
 };
 
 // ✅ تسجيل مستخدم جديد
+<<<<<<< HEAD
 router.post('/register', [
     body('email').custom(async (value) => {
         // If email is undefined, null, or empty string, skip validation
@@ -144,7 +146,97 @@ router.post('/register', [
             return res.status(400).json({ message: errorMessage });
         }
         res.status(500).json({ message: 'Registration failed. Please try again.' });
+=======
+router.post('/register', async (req, res) => {
+  try {
+    console.log('Registration attempt:', {
+      email: req.body.email,
+      username: req.body.username,
+      role: req.body.role,
+      phonenumber: req.body.phonenumber,
+      otpId: req.body.otpId,
+      otp: req.body.otp
+    });
+
+    const { email, password, username, role, phonenumber, otpId, otp } = req.body;
+
+    // Verify OTP first
+    const otpResult = await whatsappService.verifyOTP(otpId, otp);
+    console.log('OTP verification result:', otpResult);
+
+    if (!otpResult.success) {
+      return res.status(400).json({ error: 'Invalid OTP' });
+>>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
     }
+
+    // Use the phone number from OTP verification
+    const formattedPhoneNumber = otpResult.phoneNumber;
+
+    console.log('Phone number formatting:', {
+      original: phonenumber,
+      formatted: formattedPhoneNumber,
+      otpPhoneNumber: otpResult.phoneNumber
+    });
+
+    // Create user object
+    const userData = {
+      phoneVerified: true,
+      password,
+      username,
+      role,
+      phonenumber: formattedPhoneNumber
+    };
+
+    // Add email if provided
+    if (email) {
+      userData.email = email;
+    }
+
+    console.log('Creating user with data:', userData);
+
+    // Create and save user
+    const user = new User(userData);
+    
+    try {
+      await user.save();
+      console.log('User saved successfully:', user._id);
+      
+      // Generate JWT token
+      const token = jwt.sign(
+        { userId: user._id, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      res.status(201).json({
+        message: 'User registered successfully',
+        token,
+        user: {
+          id: user._id,
+          username: user.username,
+          role: user.role,
+          phonenumber: user.phonenumber
+        }
+      });
+    } catch (saveError) {
+      console.error('Error saving user:', saveError);
+      
+      if (saveError.code === 11000) {
+        // Handle duplicate key errors
+        if (saveError.keyPattern.phonenumber) {
+          return res.status(400).json({ error: 'Phone number already registered' });
+        }
+        if (saveError.keyPattern.username) {
+          return res.status(400).json({ error: 'Username already taken' });
+        }
+      }
+      
+      throw saveError; // Re-throw other errors to be caught by outer catch
+    }
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Registration failed', details: error.message });
+  }
 });
 
 // Handle preflight requests for login
@@ -181,7 +273,43 @@ router.post('/login', async (req, res) => {
         if (email) {
             user = await User.findOne({ email });
         } else {
+<<<<<<< HEAD
             user = await User.findOne({ phonenumber });
+=======
+            // Format the phone number to try different formats
+            let formattedNumber = phonenumber;
+            
+            // Remove any non-digit characters
+            formattedNumber = formattedNumber.replace(/\D/g, '');
+            
+            // If it starts with 002, keep it as is
+            if (formattedNumber.startsWith('002')) {
+                // Do nothing, already in the correct format
+            } 
+            // If it starts with 0, try with 0020 prefix
+            else if (formattedNumber.startsWith('0')) {
+                formattedNumber = '0020' + formattedNumber.substring(1);
+            } 
+            // If it starts with 20, add 00 prefix
+            else if (formattedNumber.startsWith('20')) {
+                formattedNumber = '00' + formattedNumber;
+            }
+            // If it doesn't start with any of the above, add 0020
+            else {
+                formattedNumber = '0020' + formattedNumber;
+            }
+            
+            console.log('Trying to find user with phone number:', formattedNumber);
+            
+            // Try to find user with the formatted phone number
+            user = await User.findOne({ phonenumber: formattedNumber });
+            
+            // If not found, try with the original number
+            if (!user) {
+                console.log('User not found with formatted number, trying original:', phonenumber);
+                user = await User.findOne({ phonenumber: phonenumber });
+            }
+>>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
         }
 
         if (!user) {
