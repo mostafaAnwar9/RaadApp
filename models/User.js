@@ -1,12 +1,19 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  email: { type: String, required: true, unique: true },
+  email: { 
+    type: String, 
+    required: false, 
+    default: null,
+    set: v => v === '' ? null : v  // Convert empty string to null
+  },
+  emailVerified: { type: Boolean, default: false },
   password: { type: String, required: true },
   username: { type: String, required: true, unique: true },
   phonenumber: {
     type: String,
     required: true,
+    unique: true,
     validate: { validator: (v) => /^\d{11}$/.test(v) },
   },
   role: { 
@@ -22,4 +29,8 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model('User', userSchema);
+const User = mongoose.model('User', userSchema);
+
+
+
+module.exports = User;

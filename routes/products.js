@@ -5,6 +5,29 @@ const Store = require('../models/Store');
 const { verifyToken } = require('../routes/auth');
 const { body, validationResult } = require('express-validator');
 
+// CORS middleware for all routes in this router
+router.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, store-id');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  
+  next();
+});
+
+// Handle OPTIONS requests for CORS preflight
+router.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, store-id');
+  res.status(204).end();
+});
+
 // ✅ 1. جلب المنتجات الخاصة بصاحب المتجر فقط
 router.get('/', verifyToken, async (req, res) => {
     try {
