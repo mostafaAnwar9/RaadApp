@@ -6,8 +6,8 @@ const nodemailer = require('nodemailer');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER || 'raadapp0@gmail.com',
-    pass: process.env.EMAIL_PASSWORD || 'rhea yfjh gimg iepb'
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
   }
 });
 
@@ -22,7 +22,7 @@ router.post('/send-otp', async (req, res) => {
 
     // Email content
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'raadapp0@gmail.com',
+      from: process.env.EMAIL_USER,
       to: email,
       subject: 'رمز التحقق من البريد الإلكتروني',
       html: `

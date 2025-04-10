@@ -1,221 +1,218 @@
-const { makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
-const { randomInt } = require('crypto');
-const { join } = require('path');
-const fs = require('fs');
+const pino = require('pino');
 
 class WhatsAppService {
   constructor() {
-    this.socket = null;
-    this.verificationCodes = new Map();
+    this.sock = null;
+    this.connectionResolve = null;
+    this.connectionReject = null;
+    this.connectionPromise = new Promise((resolve, reject) => {
+      this.connectionResolve = resolve;
+      this.connectionReject = reject;
+    });
+    this.otpStore = new Map();
+    this.isConnecting = false;
     this.isConnected = false;
-    this.initializationPromise = null;
-  }
-
-  generateVerificationCode() {
-    return randomInt(100000, 999999).toString();
+    this.initializeSocket().catch(console.error);
   }
 
   async initializeSocket() {
-    // If already connected, return immediately
-    if (this.isConnected && this.socket) {
-      console.log('WhatsApp socket already connected');
-      return true;
+    if (this.isConnecting) {
+      return this.connectionPromise;
     }
-    
-    // If initialization is in progress, return the existing promise
-    if (this.initializationPromise) {
-      console.log('WhatsApp socket initialization already in progress');
-      return this.initializationPromise;
-    }
-    
-    console.log('Starting WhatsApp socket initialization...');
-    
-    // Create a new initialization promise
-    this.initializationPromise = (async () => {
-      try {
-        // Ensure the auth directory exists
-        const authDir = join(__dirname, '../auth_info_baileys');
-        if (!fs.existsSync(authDir)) {
-          console.log('Creating auth directory:', authDir);
-          fs.mkdirSync(authDir, { recursive: true });
-        }
 
-        console.log('Loading auth state...');
-        const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    this.isConnecting = true;
+    console.log('Initializing WhatsApp socket...');
 
-        console.log('Creating WhatsApp socket...');
-        this.socket = makeWASocket({
-          auth: state,
-          printQRInTerminal: true,
-          defaultQueryTimeoutMs: 60000,
-        });
-
-        console.log('Setting up event listeners...');
-        this.socket.ev.on('connection.update', async (update) => {
-          const { connection, lastDisconnect } = update;
-          console.log('Connection update:', connection);
-
-          if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Connection closed. Should reconnect:', shouldReconnect);
-            if (shouldReconnect) {
-              this.isConnected = false;
-              this.initializationPromise = null;
-              await this.initializeSocket();
-            }
-          } else if (connection === 'open') {
-            this.isConnected = true;
-            console.log('WhatsApp connection established successfully');
-          }
-        });
-
-        this.socket.ev.on('creds.update', saveCreds);
-        
-        // Wait for connection to be established
-        console.log('Waiting for connection to be established...');
-        await new Promise((resolve) => {
-          const checkConnection = setInterval(() => {
-            if (this.isConnected) {
-              console.log('Connection established during wait');
-              clearInterval(checkConnection);
-              resolve();
-            }
-          }, 1000);
-          
-          // Timeout after 30 seconds
-          setTimeout(() => {
-            console.log('Connection wait timed out after 30 seconds');
-            clearInterval(checkConnection);
-            resolve();
-          }, 30000);
-        });
-        
-        console.log('WhatsApp initialization completed. Connected:', this.isConnected);
-        return this.isConnected;
-      } catch (error) {
-        console.error('Error initializing WhatsApp socket:', error);
-        this.isConnected = false;
-        this.initializationPromise = null;
-        throw error;
-      }
-    })();
-    
-    return this.initializationPromise;
-  }
-
-  async sendVerificationCode(phoneNumber) {
     try {
-      // Clean the phone number - remove any non-digit characters
-      const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
+      const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
       
-      // Format the phone number for WhatsApp
-      let formattedNumber = cleanPhoneNumber;
-      if (!formattedNumber.startsWith('+')) {
-        formattedNumber = '+' + formattedNumber;
-      }
-      
-      // Format for WhatsApp API (add @s.whatsapp.net)
-      const whatsappNumber = `${formattedNumber.replace('+', '')}@s.whatsapp.net`;
-      
-      // Generate a 6-digit verification code
-      const verificationCode = this.generateVerificationCode();
-      
-      // Store the verification code with timestamp
-      this.verificationCodes.set(whatsappNumber, {
-        code: verificationCode,
-        timestamp: Date.now(),
-        attempts: 0
+      this.sock = makeWASocket({
+        printQRInTerminal: true,
+        auth: state,
+        defaultQueryTimeoutMs: 60000,
+        connectTimeoutMs: 60000,
+        logger: pino({ level: 'silent' }),
+        markOnlineOnConnect: true,
+        syncFullHistory: false,
+        emitOwnEvents: false,
+        browser: ['Delivery App', 'Chrome', '1.0.0'],
+        retryRequestDelayMs: 2000,
+        maxRetries: 3,
+        msgRetryCounterCache: new Map(),
+        msgRetryCounterMap: new Map(),
+        downloadHistory: false,
+        keepAliveIntervalMs: 30000,
+        getMessage: async () => {
+          return {
+            conversation: 'Your verification code is: {code}'
+          }
+        },
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        msgRetryCounterCache: new Map(),
+        msgRetryCounterMap: new Map(),
+        emitOwnEvents: false,
+        syncFullHistory: false,
+        getMessage: async () => {
+          return {
+            conversation: 'Your verification code is: {code}'
+          }
+        }
       });
+
+      this.sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+        
+        if (connection === 'close') {
+          const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+          
+          if (shouldReconnect) {
+            console.log('Connection closed, attempting to reconnect...');
+            this.isConnecting = false;
+            this.isConnected = false;
+            await this.initializeSocket();
+          } else {
+            console.log('Connection closed, not reconnecting');
+            this.isConnecting = false;
+            this.isConnected = false;
+            this.connectionReject(new Error('WhatsApp connection closed'));
+          }
+        } else if (connection === 'open') {
+          console.log('WhatsApp connection opened successfully');
+          this.isConnecting = false;
+          this.isConnected = true;
+          this.connectionResolve();
+        }
+      });
+
+      this.sock.ev.on('creds.update', saveCreds);
       
-      // In development mode, just log the code and return success
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`[DEVELOPMENT MODE] Verification code for ${whatsappNumber}: ${verificationCode}`);
-        return {
-          success: true,
-          message: 'Verification code sent (development mode)',
-          phoneNumber: whatsappNumber
-        };
-      }
-      
-      // Initialize socket if not connected
-      if (!this.socket || !this.isConnected) {
-        await this.initializeSocket();
-      }
-      
-      // If still not connected after initialization, throw error
-      if (!this.isConnected) {
-        throw new Error('WhatsApp connection not established');
-      }
-      
-      // Send the verification code via WhatsApp
-      const message = `Your verification code is: ${verificationCode}. This code will expire in 5 minutes.`;
-      
-      try {
-        await this.socket.sendMessage(whatsappNumber, { text: message });
-        return {
-          success: true,
-          message: 'Verification code sent successfully',
-          phoneNumber: whatsappNumber
-        };
-      } catch (whatsappError) {
-        console.error('Error sending WhatsApp message:', whatsappError);
-        throw new Error('Failed to send WhatsApp message: ' + whatsappError.message);
-      }
+      await this.connectionPromise;
+      console.log('WhatsApp service initialized successfully');
     } catch (error) {
-      console.error('Error in sendVerificationCode:', error);
+      console.error('Error initializing WhatsApp socket:', error);
+      this.isConnecting = false;
+      this.isConnected = false;
+      this.connectionReject(error);
       throw error;
     }
   }
 
-  verifyCode(phoneNumber, code) {
+  generateVerificationCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  async sendVerificationCode(phoneNumber) {
     try {
-      // Clean the phone number - remove any non-digit characters
+      console.log('Starting sendVerificationCode with phone:', phoneNumber);
+      
+      // Validate phone number format
+      if (!phoneNumber || typeof phoneNumber !== 'string') {
+        throw new Error('Invalid phone number format');
+      }
+
+      // Clean phone number - remove any non-digit characters
       const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
-      
-      // Format the phone number for WhatsApp
-      let formattedNumber = cleanPhoneNumber;
-      if (!formattedNumber.startsWith('+')) {
-        formattedNumber = '+' + formattedNumber;
+      console.log('Cleaned phone number:', cleanPhoneNumber);
+
+      // Validate phone number length and format
+      if (cleanPhoneNumber.length !== 11 || !cleanPhoneNumber.startsWith('01')) {
+        throw new Error('Phone number must be exactly 11 digits and start with 01');
       }
-      
-      // Format for WhatsApp API (add @s.whatsapp.net)
-      const whatsappNumber = `${formattedNumber.replace('+', '')}@s.whatsapp.net`;
-      
-      const verificationData = this.verificationCodes.get(whatsappNumber);
-      
-      if (!verificationData) {
-        return false;
+
+      // Ensure socket is initialized
+      if (!this.sock) {
+        console.log('Socket not initialized, initializing now...');
+        await this.initializeSocket();
       }
-      
-      // Check if code has expired (5 minutes)
-      if (Date.now() - verificationData.timestamp > 5 * 60 * 1000) {
-        this.verificationCodes.delete(whatsappNumber);
-        return false;
+
+      // Wait for socket to be ready
+      if (!this.sock?.user?.id) {
+        console.log('Waiting for socket to be ready...');
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        if (!this.sock?.user?.id) {
+          throw new Error('WhatsApp connection not ready');
+        }
       }
-      
-      // Check if too many attempts
-      if (verificationData.attempts >= 3) {
-        this.verificationCodes.delete(whatsappNumber);
-        return false;
+
+      console.log('Socket is ready, generating OTP...');
+      const otp = this.generateVerificationCode();
+      console.log('Generated OTP:', otp);
+
+      // Store OTP with phone number and timestamp
+      this.otpStore.set(cleanPhoneNumber, {
+        code: otp,
+        timestamp: Date.now()
+      });
+      console.log('OTP stored for phone:', cleanPhoneNumber);
+
+      // Format phone number for WhatsApp (add country code)
+      const formattedPhone = `2${cleanPhoneNumber}@s.whatsapp.net`;
+      console.log('Formatted phone for WhatsApp:', formattedPhone);
+
+      // Send message with retry logic
+      let retryCount = 0;
+      const maxRetries = 3;
+      const retryDelay = 2000;
+
+      while (retryCount < maxRetries) {
+        try {
+          console.log(`Attempt ${retryCount + 1} to send message...`);
+          const message = `Your verification code is: ${otp}`;
+          
+          // Add a small delay before sending
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Send message without timeout race
+          const response = await this.sock.sendMessage(formattedPhone, {
+            text: message
+          });
+
+          console.log('Message sent successfully:', response);
+          return { success: true, message: 'Verification code sent successfully' };
+        } catch (error) {
+          console.error(`Attempt ${retryCount + 1} failed:`, error);
+          retryCount++;
+          
+          if (retryCount < maxRetries) {
+            console.log(`Waiting ${retryDelay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+          } else {
+            throw new Error(`Failed to send message after ${maxRetries} attempts: ${error.message}`);
+          }
+        }
       }
-      
-      // Increment attempts
-      verificationData.attempts++;
-      
-      // Check if code matches
-      if (verificationData.code === code) {
-        this.verificationCodes.delete(whatsappNumber);
-        return true;
-      }
-      
-      return false;
     } catch (error) {
-      console.error('Error verifying code:', error);
+      console.error('Error in sendVerificationCode:', error);
+      throw new Error(`Failed to send verification code: ${error.message}`);
+    }
+  }
+
+  verifyCode(phoneNumber, code) {
+    const storedData = this.otpStore.get(phoneNumber);
+    
+    if (!storedData) {
       return false;
     }
+
+    const { code: storedCode, timestamp } = storedData;
+    const now = Date.now();
+    const codeExpiry = 5 * 60 * 1000; // 5 minutes
+
+    if (now - timestamp > codeExpiry) {
+      this.otpStore.delete(phoneNumber);
+      return false;
+    }
+
+    const isValid = code === storedCode;
+    if (isValid) {
+      this.otpStore.delete(phoneNumber);
+    }
+
+    return isValid;
   }
 }
 
-// Export the class instead of a singleton instance
 module.exports = WhatsAppService; 

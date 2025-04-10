@@ -1,14 +1,33 @@
 const express = require('express');
 const router = express.Router();
-<<<<<<< HEAD
 const WhatsAppService = require('../services/whatsapp.service');
 const User = require('../models/User');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+
+// Enable CORS for all routes
+router.use(cors());
 
 // Create a singleton instance of WhatsAppService
 const whatsappService = new WhatsAppService();
 
 // Initialize WhatsApp service
 whatsappService.initializeSocket().catch(console.error);
+
+// Helper function to clean and validate phone number
+const cleanAndValidatePhone = (phoneNumber) => {
+  if (!phoneNumber || typeof phoneNumber !== 'string') {
+    throw new Error('Invalid phone number format');
+  }
+
+  const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
+  
+  if (cleanPhoneNumber.length !== 11 || !cleanPhoneNumber.startsWith('01')) {
+    throw new Error('Phone number must be exactly 11 digits and start with 01');
+  }
+
+  return cleanPhoneNumber;
+};
 
 // CORS middleware for all routes in this router
 router.use((req, res, next) => {
@@ -25,405 +44,182 @@ router.use((req, res, next) => {
   next();
 });
 
-router.post('/send-code', async (req, res) => {
-  try {
-    const { phoneNumber } = req.body;
-
-    if (!phoneNumber) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Phone number is required' 
-      });
-    }
-
-    // Clean the phone number - remove any non-digit characters
-    const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
-    
-    // Validate phone number format (must be between 10-15 digits)
-    if (cleanPhoneNumber.length < 10 || cleanPhoneNumber.length > 15) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Phone number must be between 10 and 15 digits',
-        details: 'Please provide a valid phone number without spaces or special characters'
-      });
-    }
-
-    try {
-      const result = await whatsappService.sendVerificationCode(cleanPhoneNumber);
-      
-      // In development mode, always return success
-      if (process.env.NODE_ENV === 'development') {
-        return res.json({
-          success: true,
-          message: 'Verification code sent successfully (development mode)',
-          developmentMode: true,
-          phoneNumber: result.phoneNumber
-        });
-      }
-      
-      res.json({
-        success: true,
-        message: result.message,
-        phoneNumber: result.phoneNumber
-      });
-    } catch (whatsappError) {
-      console.error('Error sending verification code:', whatsappError);
-      
-      // In development mode, return success even if WhatsApp fails
-      if (process.env.NODE_ENV === 'development') {
-        return res.json({
-          success: true,
-          message: 'Verification code sent successfully (development mode)',
-          developmentMode: true,
-          error: whatsappError.message
-        });
-      }
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to send verification code',
-        details: whatsappError.message
-      });
-    }
-  } catch (error) {
-    console.error('Error in send-code route:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error',
-      details: error.message
-=======
-const { body, validationResult } = require('express-validator');
-const whatsappService = require('../services/whatsapp_service');
-
-// Initialize WhatsApp service
-let whatsappInitialized = false;
-const initializeWhatsApp = async () => {
-  if (!whatsappInitialized) {
-    console.log('Initializing WhatsApp service...');
-    whatsappInitialized = await whatsappService.initialize();
-    console.log('WhatsApp service initialized:', whatsappInitialized);
-  }
-  return whatsappInitialized;
-};
-
 // Check WhatsApp connection status
 router.get('/status', async (req, res) => {
   try {
-    const initialized = await initializeWhatsApp();
-    if (!initialized) {
-      return res.status(500).json({
-        success: false,
-        message: 'WhatsApp service could not be initialized',
-        qrCode: true // Indicate that a QR code is needed
-      });
-    }
-    
-    return res.status(200).json({
+    const isConnected = await whatsappService.initializeSocket();
+    res.json({
       success: true,
-      message: 'WhatsApp service is connected',
-      connected: true
+      connected: isConnected,
+      message: isConnected ? 'WhatsApp service is connected' : 'WhatsApp service is not connected'
     });
   } catch (error) {
     console.error('Error checking WhatsApp status:', error);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       message: 'Error checking WhatsApp status: ' + error.message
->>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
     });
   }
 });
 
-<<<<<<< HEAD
-router.post('/verify-code', async (req, res) => {
+// Send verification code
+router.post('/send-code', async (req, res) => {
+  console.log('Received send-code request:', req.body);
+  
   try {
-    const { phoneNumber, code } = req.body;
-
-    if (!phoneNumber || !code) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Phone number and code are required' 
-      });
-    }
-
-    // Clean the phone number - remove any non-digit characters
-    const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
-    
-    // Validate phone number format (must be between 10-15 digits)
-    if (cleanPhoneNumber.length < 10 || cleanPhoneNumber.length > 15) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Phone number must be between 10 and 15 digits',
-        details: 'Please provide a valid phone number without spaces or special characters'
-      });
-    }
-
-    try {
-      const verified = whatsappService.verifyCode(cleanPhoneNumber, code);
-
-      if (verified) {
-        // Update user's phoneVerified status in the database
-        try {
-          const user = await User.findOne({ phonenumber: cleanPhoneNumber });
-          if (user) {
-            user.phoneVerified = true;
-            await user.save();
-            console.log(`User ${user.username} phone number verified successfully`);
-          } else {
-            console.log(`User with phone number ${cleanPhoneNumber} not found`);
-          }
-        } catch (dbError) {
-          console.error('Error updating user phone verification status:', dbError);
-          // Continue with the response even if database update fails
-        }
-        
-        res.json({
-          success: true,
-          verified: true,
-          phoneVerified: true,
-          message: 'Phone number verified successfully'
-        });
-      } else {
-        // In development mode, allow any 6-digit code to work
-        if (process.env.NODE_ENV === 'development' && code.length === 6 && /^\d+$/.test(code)) {
-          console.log('[DEVELOPMENT MODE] Allowing verification with code:', code);
-          
-          // Update user's phoneVerified status in development mode too
-          try {
-            const user = await User.findOne({ phonenumber: cleanPhoneNumber });
-            if (user) {
-              user.phoneVerified = true;
-              await user.save();
-              console.log(`[DEVELOPMENT MODE] User ${user.username} phone number verified successfully`);
-            } else {
-              console.log(`[DEVELOPMENT MODE] User with phone number ${cleanPhoneNumber} not found`);
-            }
-          } catch (dbError) {
-            console.error('[DEVELOPMENT MODE] Error updating user phone verification status:', dbError);
-          }
-          
-          return res.json({
-            success: true,
-            verified: true,
-            phoneVerified: true,
-            message: 'Phone number verified successfully (development mode)',
-            developmentMode: true
-          });
-        }
-        
-        res.status(400).json({
-          success: false,
-          verified: false,
-          error: 'Invalid or expired verification code'
-        });
-      }
-    } catch (verificationError) {
-      console.error('Error verifying code:', verificationError);
-      
-      // In development mode, allow any 6-digit code to work
-      if (process.env.NODE_ENV === 'development' && code.length === 6 && /^\d+$/.test(code)) {
-        console.log('[DEVELOPMENT MODE] Allowing verification with code:', code);
-        
-        // Update user's phoneVerified status in development mode too
-        try {
-          const user = await User.findOne({ phonenumber: cleanPhoneNumber });
-          if (user) {
-            user.phoneVerified = true;
-            await user.save();
-            console.log(`[DEVELOPMENT MODE] User ${user.username} phone number verified successfully`);
-          } else {
-            console.log(`[DEVELOPMENT MODE] User with phone number ${cleanPhoneNumber} not found`);
-          }
-        } catch (dbError) {
-          console.error('[DEVELOPMENT MODE] Error updating user phone verification status:', dbError);
-        }
-        
-        return res.json({
-          success: true,
-          verified: true,
-          phoneVerified: true,
-          message: 'Phone number verified successfully (development mode)',
-          developmentMode: true
-        });
-      }
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to verify code',
-        details: verificationError.message
-      });
-    }
-  } catch (error) {
-    console.error('Error in verify-code route:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error',
-      details: error.message
-=======
-// Send OTP to phone number
-router.post('/send-otp', [
-  body('phoneNumber').notEmpty().withMessage('Phone number is required')
-    .matches(/^0\d{10}$/).withMessage('Phone number must be 11 digits starting with 0')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ 
-      success: false, 
-      message: errors.array()[0].msg 
-    });
-  }
-
-  try {
-    // Initialize WhatsApp service if not already initialized
-    const initialized = await initializeWhatsApp();
-    if (!initialized) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'WhatsApp service could not be initialized. Please check the server logs for the QR code.',
-        qrCode: true
-      });
-    }
-
     const { phoneNumber } = req.body;
-    console.log('Sending OTP to phone number:', phoneNumber);
     
-    const result = await whatsappService.sendOTP(phoneNumber);
-    console.log('OTP send result:', result);
-    
-    if (result.success) {
-      res.status(200).json({
-        success: true,
-        message: 'OTP sent successfully',
-        otpId: result.otpId
-      });
-    } else {
-      // Check if the error is related to QR code scanning
-      if (result.message.includes('QR code')) {
-        res.status(400).json({
-          success: false,
-          message: result.message,
-          qrCode: true
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          message: result.message
-        });
-      }
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Phone number is required' });
     }
+
+    // Clean and validate phone number
+    const cleanPhoneNumber = cleanAndValidatePhone(phoneNumber);
+
+    // Send verification code
+    const result = await whatsappService.sendVerificationCode(cleanPhoneNumber);
+    return res.json(result);
   } catch (error) {
-    console.error('Error sending OTP:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send OTP: ' + error.message
->>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
-    });
+    console.error('Error in send-code route:', error);
+    
+    if (error.message.includes('not connected')) {
+      return res.status(503).json({ error: 'WhatsApp service is not connected. Please scan the QR code first.' });
+    } else if (error.message.includes('timeout')) {
+      return res.status(504).json({ error: 'Message sending timed out. Please try again.' });
+    } else if (error.message.includes('not registered')) {
+      return res.status(400).json({ error: 'Phone number is not registered on WhatsApp' });
+    } else {
+      return res.status(500).json({ error: 'Failed to send verification code: ' + error.message });
+    }
   }
 });
 
-<<<<<<< HEAD
-router.get('/verify-status/:phoneNumber', async (req, res) => {
+// Verify code and create/update user
+router.post('/verify-code', async (req, res) => {
+  console.log('Received verify-code request:', req.body);
+  
   try {
-    const { phoneNumber } = req.params;
+    const { verificationCode, userData } = req.body;
+    
+    if (!verificationCode) {
+      return res.status(400).json({ error: 'Verification code is required' });
+    }
+
+    // Validate code format
+    if (!/^\d{6}$/.test(verificationCode)) {
+      return res.status(400).json({ error: 'Code must be exactly 6 digits' });
+    }
+
+    // Get the phone number from the OTP store
+    let phoneNumber = null;
+    for (const [key, value] of whatsappService.otpStore.entries()) {
+      if (value.code === verificationCode) {
+        phoneNumber = key;
+        break;
+      }
+    }
 
     if (!phoneNumber) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Phone number is required' 
-      });
+      return res.status(400).json({ error: 'Invalid verification code' });
     }
 
-    // Clean the phone number - remove any non-digit characters
-    const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
+    // Verify code
+    const isValid = whatsappService.verifyCode(phoneNumber, verificationCode);
     
-    // Validate phone number format (must be between 10-15 digits)
-    if (cleanPhoneNumber.length < 10 || cleanPhoneNumber.length > 15) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Phone number must be between 10 and 15 digits',
-        details: 'Please provide a valid phone number without spaces or special characters'
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid verification code' });
+    }
+
+    // If user data is provided, create the user
+    if (userData) {
+      const { username, password, role, email } = userData;
+      
+      // Clean the phone number
+      const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
+      
+      // Create user object
+      const userObj = {
+        username,
+        password: await bcrypt.hash(password, 10),
+        role: role || 'customer',
+        status: role === 'delivery' ? 'pending' : 'approved',
+        phonenumber: cleanPhoneNumber,
+        emailVerified: false,
+        phoneVerified: true
+      };
+
+      // Add email if provided
+      if (email && email.trim() !== '') {
+        userObj.email = email.trim();
+      }
+
+      // Create and save user
+      const newUser = new User(userObj);
+      await newUser.save();
+
+      return res.json({ 
+        success: true, 
+        message: 'Phone number verified and user created successfully',
+        user: {
+          username: newUser.username,
+          email: newUser.email || null,
+          role: newUser.role,
+          status: newUser.status,
+          emailVerified: newUser.emailVerified,
+          phonenumber: newUser.phonenumber,
+          phoneVerified: newUser.phoneVerified
+        }
       });
     }
 
-    try {
-      // Check if the user exists and has verified phone
-      const user = await User.findOne({ phonenumber: cleanPhoneNumber });
-      
-      if (!user) {
-        return res.json({
-          success: true,
-          verified: false,
-          message: 'User not found with this phone number'
-        });
+    return res.json({ 
+      success: true, 
+      message: 'Phone number verified successfully'
+    });
+  } catch (error) {
+    console.error('Error in verify-code route:', error);
+    
+    if (error.code === 11000) {
+      let errorMessage = 'This record already exists.';
+      if (error.keyPattern) {
+        if (error.keyPattern.phonenumber) {
+          errorMessage = 'This phone number is already registered. Please use a different phone number or try logging in.';
+        } else if (error.keyPattern.username) {
+          errorMessage = 'This username is already taken. Please choose a different username.';
+        }
       }
-      
-      return res.json({
-        success: true,
-        verified: user.phoneVerified || false,
-        message: user.phoneVerified ? 'Phone number is verified' : 'Phone number is not verified'
-      });
-    } catch (dbError) {
-      console.error('Error checking phone verification status:', dbError);
-      
-      // In development mode, return a mock response
-      if (process.env.NODE_ENV === 'development') {
-        return res.json({
-          success: true,
-          verified: true,
-          message: 'Phone number is verified (development mode)',
-          developmentMode: true
-        });
-      }
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to check verification status',
-        details: dbError.message
-      });
+      return res.status(400).json({ error: errorMessage });
     }
+    
+    return res.status(500).json({ error: 'Failed to verify code: ' + error.message });
+  }
+});
+
+// Check verification status
+router.get('/verify-status/:phoneNumber', async (req, res) => {
+  console.log('Received verify-status request:', req.params);
+  
+  try {
+    const { phoneNumber } = req.params;
+    
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Phone number is required' });
+    }
+
+    // Clean and validate phone number
+    const cleanPhoneNumber = cleanAndValidatePhone(phoneNumber);
+
+    // Check user verification status
+    const user = await User.findOne({ phonenumber: cleanPhoneNumber });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json({ verified: user.phoneVerified });
   } catch (error) {
     console.error('Error in verify-status route:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error',
-      details: error.message
-=======
-// Verify OTP
-router.post('/verify-otp', [
-  body('otpId').notEmpty().withMessage('OTP ID is required'),
-  body('otp').notEmpty().withMessage('OTP is required')
-    .matches(/^\d{6}$/).withMessage('OTP must be 6 digits')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ 
-      success: false, 
-      message: errors.array()[0].msg 
-    });
-  }
-
-  try {
-    const { otpId, otp } = req.body;
-    const result = whatsappService.verifyOTP(otpId, otp);
-    
-    if (result.success) {
-      res.status(200).json({
-        success: true,
-        message: 'OTP verified successfully',
-        phoneNumber: result.phoneNumber
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        message: result.message
-      });
-    }
-  } catch (error) {
-    console.error('Error verifying OTP:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to verify OTP: ' + error.message
->>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
-    });
+    return res.status(500).json({ error: 'Failed to check verification status: ' + error.message });
   }
 });
 

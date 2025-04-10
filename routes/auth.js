@@ -3,9 +3,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
-const Store = require('../models/Store'); 
-const whatsappService = require('../services/whatsapp_service');
-
+const Store = require('../models/Store');
+const whatsappService = require('../services/whatsapp.service');
 
 const router = express.Router();
 
@@ -24,385 +23,309 @@ router.use((req, res, next) => {
   next();
 });
 
-// ✅ Middleware للتحقق من التوكن
+// Middleware to verify token
 const verifyToken = async (req, res, next) => {
-    try {
-        const token = req.header('Authorization')?.split(' ')[1]; // استخراج التوكن
-        if (!token) return res.status(401).json({ message: 'Access Denied' });
+  try {
+    const token = req.header('Authorization')?.split(' ')[1];
+    if (!token) return res.status(401).json({ message: 'Access Denied' });
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded._id).select('-password');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded._id).select('-password');
 
-        if (!user) return res.status(401).json({ message: 'Invalid Token' });
+    if (!user) return res.status(401).json({ message: 'Invalid Token' });
 
-        req.user = user; // ✅ إضافة معلومات المستخدم للـ req
-        next();
-    } catch (error) {
-        res.status(401).json({ message: 'Invalid Token' });
-    }
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid Token' });
+  }
 };
 
-// ✅ تسجيل مستخدم جديد
-<<<<<<< HEAD
+// Register new user
 router.post('/register', [
-    body('email').custom(async (value) => {
-        // If email is undefined, null, or empty string, skip validation
-        if (!value || value.trim() === '') {
-            return true;
-        }
-        
-        // If email is provided, validate it's a proper email format
-        if (!value.includes('@') || !value.includes('.')) {
-            throw new Error('Please provide a valid email address');
-        }
-        
-        // Check if email already exists
-        const user = await User.findOne({ email: value.trim() });
-        if (user) {
-            throw new Error('This email is already registered. Please use a different email or try logging in.');
-        }
-        return true;
-    }),
-    body('password').isLength({ min: 8 }).matches(/\d/).matches(/[a-zA-Z]/),
-    body('username').custom(async (value) => {
-        const user = await User.findOne({ username: value });
-        if (user) throw new Error('Username already exists');
-        return true;
-    }),
-    body('role').isIn(['customer', 'delivery', 'admin']),
-    body('phonenumber').custom(async (value) => {
-        // Validate phone number format
-        if (!value || !/^\d{11}$/.test(value)) {
-            throw new Error('Phone number must be 11 digits');
-        }
-        
-        // Check if phone number already exists
-        const user = await User.findOne({ phonenumber: value });
-        if (user) {
-            throw new Error('This phone number is already registered. Please use a different phone number or try logging in.');
-        }
-        return true;
-    })
+  body('email').custom(async (value) => {
+    if (!value || value.trim() === '') return true;
+    
+    if (!value.includes('@') || !value.includes('.')) {
+      throw new Error('Please provide a valid email address');
+    }
+    
+    const user = await User.findOne({ email: value.trim() });
+    if (user) {
+      throw new Error('This email is already registered. Please use a different email or try logging in.');
+    }
+    return true;
+  }),
+  body('password').isLength({ min: 8 }).matches(/\d/).matches(/[a-zA-Z]/),
+  body('username').custom(async (value) => {
+    const user = await User.findOne({ username: value });
+    if (user) throw new Error('Username already exists');
+    return true;
+  }),
+  body('role').isIn(['customer', 'delivery', 'admin']),
+  body('phonenumber').custom(async (value) => {
+    if (!value) {
+      throw new Error('Phone number is required');
+    }
+    
+    // Clean the phone number (remove non-digits)
+    const cleanPhoneNumber = value.replace(/\D/g, '');
+    
+    if (cleanPhoneNumber.length !== 11) {
+      throw new Error('Phone number must be exactly 11 digits');
+    }
+    
+    if (!cleanPhoneNumber.startsWith('01')) {
+      throw new Error('Phone number must start with 01');
+    }
+    
+    const user = await User.findOne({ phonenumber: cleanPhoneNumber });
+    if (user) {
+      throw new Error('This phone number is already registered. Please use a different phone number or try logging in.');
+    }
+    return true;
+  })
 ], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        const errorMessages = errors.array().map(err => err.msg);
-        return res.status(400).json({ 
-            message: errorMessages[0],
-            errors: errorMessages
-        });
-    }
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    const errorMessages = errors.array().map(err => err.msg);
+    return res.status(400).json({ 
+      message: errorMessages[0],
+      errors: errorMessages
+    });
+  }
 
-    try {
-        const { email, password, username, role, phonenumber } = req.body;
-        
-        // Create user object without email first
-        const userObj = {
-            password: await bcrypt.hash(password, 10),
-            username,
-            role,
-            status: role === 'delivery' ? 'pending' : 'approved',
-            phonenumber,
-            emailVerified: false,
-            phoneVerified: false
-        };
-
-        // Only add email if it's provided and not empty
-        if (email && email.trim() !== '') {
-            userObj.email = email.trim();
-        }
-        // Otherwise, email will be null by default
-
-        console.log('Creating user with object:', userObj); // Debug log
-
-        const newUser = new User(userObj);
-        await newUser.save();
-        
-        res.status(201).json({ 
-            message: 'Registration successful', 
-            user: { 
-                username, 
-                email: userObj.email || null, 
-                role, 
-                status: newUser.status,
-                emailVerified: newUser.emailVerified,
-                phonenumber: newUser.phonenumber,
-                phoneVerified: newUser.phoneVerified
-            } 
-        });
-    } catch (error) {
-        console.error('Registration error:', error); // Debug log
-        
-        // Handle MongoDB unique constraint errors
-        if (error.code === 11000) {
-            let errorMessage = 'This record already exists.';
-            if (error.keyPattern) {
-                if (error.keyPattern.phonenumber) {
-                    errorMessage = 'This phone number is already registered. Please use a different phone number or try logging in.';
-                } else if (error.keyPattern.username) {
-                    errorMessage = 'This username is already taken. Please choose a different username.';
-                }
-            }
-            return res.status(400).json({ message: errorMessage });
-        }
-        res.status(500).json({ message: 'Registration failed. Please try again.' });
-=======
-router.post('/register', async (req, res) => {
   try {
-    console.log('Registration attempt:', {
-      email: req.body.email,
-      username: req.body.username,
-      role: req.body.role,
-      phonenumber: req.body.phonenumber,
-      otpId: req.body.otpId,
-      otp: req.body.otp
-    });
-
-    const { email, password, username, role, phonenumber, otpId, otp } = req.body;
-
-    // Verify OTP first
-    const otpResult = await whatsappService.verifyOTP(otpId, otp);
-    console.log('OTP verification result:', otpResult);
-
-    if (!otpResult.success) {
-      return res.status(400).json({ error: 'Invalid OTP' });
->>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
-    }
-
-    // Use the phone number from OTP verification
-    const formattedPhoneNumber = otpResult.phoneNumber;
-
-    console.log('Phone number formatting:', {
-      original: phonenumber,
-      formatted: formattedPhoneNumber,
-      otpPhoneNumber: otpResult.phoneNumber
-    });
-
-    // Create user object
-    const userData = {
-      phoneVerified: true,
-      password,
+    const { email, password, username, role, phonenumber } = req.body;
+    
+    // Clean the phone number
+    const cleanPhoneNumber = phonenumber.replace(/\D/g, '');
+    
+    // Create user object without email first
+    const userObj = {
+      password: await bcrypt.hash(password, 10),
       username,
       role,
-      phonenumber: formattedPhoneNumber
+      status: role === 'delivery' ? 'pending' : 'approved',
+      phonenumber: cleanPhoneNumber,
+      emailVerified: false,
+      phoneVerified: false
     };
 
-    // Add email if provided
-    if (email) {
-      userData.email = email;
+    // Only add email if it's provided and not empty
+    if (email && email.trim() !== '') {
+      userObj.email = email.trim();
     }
 
-    console.log('Creating user with data:', userData);
+    console.log('Creating user with object:', userObj);
 
-    // Create and save user
-    const user = new User(userData);
+    const newUser = new User(userObj);
+    await newUser.save();
     
-    try {
-      await user.save();
-      console.log('User saved successfully:', user._id);
-      
-      // Generate JWT token
-      const token = jwt.sign(
-        { userId: user._id, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      res.status(201).json({
-        message: 'User registered successfully',
-        token,
-        user: {
-          id: user._id,
-          username: user.username,
-          role: user.role,
-          phonenumber: user.phonenumber
-        }
-      });
-    } catch (saveError) {
-      console.error('Error saving user:', saveError);
-      
-      if (saveError.code === 11000) {
-        // Handle duplicate key errors
-        if (saveError.keyPattern.phonenumber) {
-          return res.status(400).json({ error: 'Phone number already registered' });
-        }
-        if (saveError.keyPattern.username) {
-          return res.status(400).json({ error: 'Username already taken' });
-        }
-      }
-      
-      throw saveError; // Re-throw other errors to be caught by outer catch
-    }
+    res.status(201).json({ 
+      message: 'Registration successful', 
+      user: { 
+        username, 
+        email: userObj.email || null, 
+        role, 
+        status: newUser.status,
+        emailVerified: newUser.emailVerified,
+        phonenumber: newUser.phonenumber,
+        phoneVerified: newUser.phoneVerified
+      } 
+    });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed', details: error.message });
+    
+    if (error.code === 11000) {
+      let errorMessage = 'This record already exists.';
+      if (error.keyPattern) {
+        if (error.keyPattern.phonenumber) {
+          errorMessage = 'This phone number is already registered. Please use a different phone number or try logging in.';
+        } else if (error.keyPattern.username) {
+          errorMessage = 'This username is already taken. Please choose a different username.';
+        }
+      }
+      return res.status(400).json({ message: errorMessage });
+    }
+    res.status(500).json({ message: 'Registration failed. Please try again.' });
   }
 });
 
 // Handle preflight requests for login
 router.options('/login', (req, res) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.status(204).end();
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(204).end();
 });
 
+// Login user
 router.post('/login', async (req, res) => {
-    console.log('🔍 Login attempt:', { email: req.body.email, phonenumber: req.body.phonenumber });
-    
-    // Set CORS headers for the login route
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
+  console.log('🔍 Login attempt:', { 
+    email: req.body.email, 
+    phoneNumber: req.body.phoneNumber,
+    phonenumber: req.body.phonenumber,
+    password: req.body.password ? '***' : 'undefined'
+  });
+  
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
 
-    const { email, phonenumber, password } = req.body;
+  const { email, phoneNumber, phonenumber, password } = req.body;
 
-    if (!password) {
-        return res.status(400).json({ message: "Password is required" });
+  if (!password) {
+    return res.status(400).json({ 
+      success: false,
+      message: "Password is required",
+      error: "MISSING_PASSWORD"
+    });
+  }
+
+  if (!email && !phoneNumber && !phonenumber) {
+    return res.status(400).json({ 
+      success: false,
+      message: "Either email or phone number is required",
+      error: "MISSING_IDENTIFIER"
+    });
+  }
+
+  try {
+    let user;
+    if (email) {
+      user = await User.findOne({ email });
+    } else {
+      // Clean the phone number (remove non-digits) and validate length
+      const cleanPhoneNumber = (phoneNumber || phonenumber).replace(/\D/g, '');
+      if (cleanPhoneNumber.length !== 11) {
+        return res.status(400).json({ 
+          success: false,
+          message: "Phone number must be exactly 11 digits",
+          error: "INVALID_PHONE_FORMAT"
+        });
+      }
+      user = await User.findOne({ phonenumber: cleanPhoneNumber });
     }
 
-    if (!email && !phonenumber) {
-        return res.status(400).json({ message: "Either email or phone number is required" });
+    if (!user) {
+      console.log('❌ User not found:', email || phoneNumber || phonenumber);
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found. Please check your credentials or sign up.",
+        error: "USER_NOT_FOUND"
+      });
     }
 
-    try {
-        // Find user by email or phone number
-        let user;
-        if (email) {
-            user = await User.findOne({ email });
-        } else {
-<<<<<<< HEAD
-            user = await User.findOne({ phonenumber });
-=======
-            // Format the phone number to try different formats
-            let formattedNumber = phonenumber;
-            
-            // Remove any non-digit characters
-            formattedNumber = formattedNumber.replace(/\D/g, '');
-            
-            // If it starts with 002, keep it as is
-            if (formattedNumber.startsWith('002')) {
-                // Do nothing, already in the correct format
-            } 
-            // If it starts with 0, try with 0020 prefix
-            else if (formattedNumber.startsWith('0')) {
-                formattedNumber = '0020' + formattedNumber.substring(1);
-            } 
-            // If it starts with 20, add 00 prefix
-            else if (formattedNumber.startsWith('20')) {
-                formattedNumber = '00' + formattedNumber;
-            }
-            // If it doesn't start with any of the above, add 0020
-            else {
-                formattedNumber = '0020' + formattedNumber;
-            }
-            
-            console.log('Trying to find user with phone number:', formattedNumber);
-            
-            // Try to find user with the formatted phone number
-            user = await User.findOne({ phonenumber: formattedNumber });
-            
-            // If not found, try with the original number
-            if (!user) {
-                console.log('User not found with formatted number, trying original:', phonenumber);
-                user = await User.findOne({ phonenumber: phonenumber });
-            }
->>>>>>> 2fda4e4fc79e0ae3e7ae1c7e1e0a48936e570673
-        }
-
-        if (!user) {
-            console.log('❌ User not found:', email || phonenumber);
-            return res.status(404).json({ message: "User not found. Please check your credentials or sign up." });
-        }
-
-        if (user.role === 'delivery' && user.status === 'pending') {
-            console.log('⚠️ Delivery account pending:', email || phonenumber);
-            return res.status(403).json({ message: 'Your delivery account is pending approval.' });
-        }
-
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            console.log('❌ Invalid password for user:', email || phonenumber);
-            return res.status(400).json({ message: "Incorrect password. Please try again." });
-        }
-
-        const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-        // ✅ تجهيز البيانات التي سيتم إرجاعها
-        const responseData = {
-            _id: user._id,
-            token,
-            role: user.role,
-            status: user.status,
-            username: user.username,
-            phoneNumber: user.phonenumber,
-            email: user.email,
-            emailVerified: user.emailVerified
-        };          
-
-        if (user.role === 'owner') {
-            responseData.ownerId = user._id;
-
-            // ✅ البحث عن المتجر المرتبط بهذا المالك
-            const store = await Store.findOne({ ownerId: user._id });
-            if (store) {
-                responseData.store_id = store._id; // ✅ إضافة store_id إلى الاستجابة
-            } else {
-                console.log('⚠️ No store found for owner:', email || phonenumber);
-                return res.status(404).json({ message: "No store found for this owner." });
-            }
-        }
-
-        console.log('✅ Login successful for user:', email || phonenumber);
-        res.json(responseData);
-    } catch (err) {
-        console.error('❌ Login error:', err);
-        res.status(500).json({ message: "An error occurred. Please try again later." });
+    if (user.role === 'delivery' && user.status === 'pending') {
+      console.log('⚠️ Delivery account pending:', email || phoneNumber || phonenumber);
+      return res.status(403).json({ 
+        success: false,
+        message: 'Your delivery account is pending approval.',
+        error: "ACCOUNT_PENDING"
+      });
     }
+
+    // Ensure both password and user.password are strings
+    if (typeof password !== 'string' || typeof user.password !== 'string') {
+      console.error('Password type mismatch:', {
+        provided: typeof password,
+        stored: typeof user.password
+      });
+      return res.status(500).json({ 
+        success: false,
+        message: "Password validation error",
+        error: "PASSWORD_VALIDATION_ERROR"
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      console.log('❌ Invalid password for user:', email || phoneNumber || phonenumber);
+      return res.status(400).json({ 
+        success: false,
+        message: "Incorrect password. Please try again.",
+        error: "INVALID_PASSWORD"
+      });
+    }
+
+    const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    const responseData = {
+      success: true,
+      _id: user._id,
+      token,
+      role: user.role,
+      status: user.status,
+      username: user.username,
+      phoneNumber: user.phonenumber,
+      email: user.email,
+      emailVerified: user.emailVerified
+    };
+
+    if (user.role === 'owner') {
+      responseData.ownerId = user._id;
+      const store = await Store.findOne({ ownerId: user._id });
+      if (store) {
+        responseData.store_id = store._id;
+      } else {
+        console.log('⚠️ No store found for owner:', email || phoneNumber || phonenumber);
+        return res.status(404).json({ 
+          success: false,
+          message: "No store found for this owner.",
+          error: "STORE_NOT_FOUND"
+        });
+      }
+    }
+
+    console.log('✅ Login successful for user:', email || phoneNumber || phonenumber);
+    res.json(responseData);
+  } catch (err) {
+    console.error('❌ Login error:', err);
+    res.status(500).json({ 
+      success: false,
+      message: "An error occurred. Please try again later.",
+      error: "INTERNAL_SERVER_ERROR"
+    });
+  }
 });
 
 // Email verification endpoint
 router.post('/verify-email', async (req, res) => {
-    const { userId, token } = req.body;
-    
-    if (!userId || !token) {
-        return res.status(400).json({ message: "User ID and verification token are required" });
+  const { userId, token } = req.body;
+  
+  if (!userId || !token) {
+    return res.status(400).json({ message: "User ID and verification token are required" });
+  }
+  
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
     
-    try {
-        // In a real implementation, you would verify the token against a stored token
-        // For this example, we'll just update the user's emailVerified status
-        
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        
-        if (!user.email) {
-            return res.status(400).json({ message: "User does not have an email to verify" });
-        }
-        
-        // In a real implementation, you would verify the token here
-        // For now, we'll just mark the email as verified
-        
-        user.emailVerified = true;
-        await user.save();
-        
-        res.status(200).json({ 
-            message: "Email verified successfully",
-            user: {
-                _id: user._id,
-                username: user.username,
-                email: user.email,
-                emailVerified: user.emailVerified
-            }
-        });
-    } catch (error) {
-        console.error("❌ Error verifying email:", error);
-        res.status(500).json({ message: "An error occurred while verifying email" });
+    if (!user.email) {
+      return res.status(400).json({ message: "User does not have an email to verify" });
     }
+    
+    user.emailVerified = true;
+    await user.save();
+    
+    res.status(200).json({ 
+      message: "Email verified successfully",
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        emailVerified: user.emailVerified
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error verifying email:", error);
+    res.status(500).json({ message: "An error occurred while verifying email" });
+  }
 });
 
 module.exports = router;
