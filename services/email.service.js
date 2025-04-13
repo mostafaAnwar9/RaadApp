@@ -1,90 +1,154 @@
 const nodemailer = require('nodemailer');
-const { randomInt } = require('crypto');
+const crypto = require('crypto');
+const OTP = require('../models/OTP');
 
 class EmailService {
   constructor() {
-    this.verificationCodes = new Map();
+    this.debugMode = false; // Ensure debug mode is disabled
     this.transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === 'true',
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
-      }
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
     });
-  }
-
-  generateVerificationCode() {
-    return randomInt(100000, 999999).toString();
   }
 
   async sendVerificationCode(email) {
     try {
-      console.log(`Attempting to send verification code to ${email}`);
+      console.log('Sending verification code to email:', email);
       
-      // Generate verification code
-      const verificationCode = this.generateVerificationCode();
+      // Normalize email to lowercase for case-insensitive comparison
+      const normalizedEmail = email.toLowerCase();
       
-      console.log(`Generated verification code: ${verificationCode}`);
-      
-      // Store the verification code with timestamp
-      this.verificationCodes.set(email, {
-        code: verificationCode,
-        timestamp: Date.now(),
+      // Generate a 6-digit code
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      console.log('Generated code:', code);
+
+      // Delete any existing OTP for this email
+      await OTP.deleteMany({ email: normalizedEmail });
+
+      // Create new OTP document
+      const otp = new OTP({
+        email: normalizedEmail,
+        code,
+        timestamp: new Date(),
+        attempts: 0,
+        expiresAt: new Date(Date.now() + (10 * 60 * 1000)) // 10 minutes expiry
       });
-      
-      // Email content
+
+      // Save to database
+      await otp.save();
+      console.log('Stored OTP data:', {
+        email: normalizedEmail,
+        code: otp.code,
+        timestamp: otp.timestamp.toISOString(),
+        expiresAt: otp.expiresAt.toISOString()
+      });
+
+      // Send the actual email
       const mailOptions = {
-        from: process.env.EMAIL_USER,
+        from: process.env.SMTP_FROM,
         to: email,
-        subject: 'Email Verification Code',
+        subject: 'Your Verification Code',
         html: `
-          <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; border-radius: 10px;">
-            <h2 style="color: #673AB7; text-align: center;">Email Verification Code</h2>
-            <p style="font-size: 16px; line-height: 1.6;">Welcome to the Delivery App!</p>
-            <p style="font-size: 16px; line-height: 1.6;">Your verification code is:</p>
-            <div style="background-color: #673AB7; color: white; padding: 15px; border-radius: 8px; text-align: center; font-size: 24px; font-weight: bold; margin: 20px 0;">
-              ${verificationCode}
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">Verification Code</h2>
+            <p>Your verification code is:</p>
+            <div style="background-color: #f5f5f5; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+              ${code}
             </div>
-            <p style="font-size: 16px; line-height: 1.6;">This code will expire in 5 minutes.</p>
-            <p style="font-size: 16px; line-height: 1.6;">If you didn't request this code, please ignore this email.</p>
-            <p style="font-size: 14px; color: #666; margin-top: 30px; text-align: center;">Best regards,<br>Delivery App Team</p>
+            <p>This code will expire in 10 minutes.</p>
+            <p>If you didn't request this code, please ignore this email.</p>
           </div>
         `
       };
 
-      // Send email
       await this.transporter.sendMail(mailOptions);
-      
-      console.log(`Email verification code sent to ${email}`);
-      return verificationCode;
+      console.log('Email sent successfully to:', email);
+
+      return { success: true, message: 'Verification code sent successfully' };
     } catch (error) {
-      console.error('Error sending email verification code:', error);
-      throw new Error('Failed to send email verification code: ' + error.message);
+      console.error('Error sending verification code:', error);
+      return { success: false, error: error.message || 'Error sending verification code' };
     }
   }
 
-  verifyCode(email, code) {
-    const storedData = this.verificationCodes.get(email);
-    
-    if (!storedData) {
-      return false;
-    }
+  async verifyCode(email, code) {
+    try {
+      console.log('Verifying code for email:', email);
+      console.log('Received code:', code);
 
-    // Check if code has expired (5 minutes)
-    if (Date.now() - storedData.timestamp > 5 * 60 * 1000) {
-      this.verificationCodes.delete(email);
-      return false;
-    }
+      // Normalize email to lowercase for case-insensitive comparison
+      const normalizedEmail = email.toLowerCase();
+      
+      // Clean the code (remove any whitespace)
+      const cleanCode = code.toString().trim();
+      console.log('Cleaned code:', cleanCode);
 
-    // Check if code matches
-    if (storedData.code === code) {
-      this.verificationCodes.delete(email);
-      return true;
-    }
+      // Get stored OTP from database
+      const storedOTP = await OTP.findOne({ email: normalizedEmail });
+      console.log('Stored OTP:', storedOTP);
 
-    return false;
+      // Check if code exists
+      if (!storedOTP) {
+        console.log('No verification code found for email:', normalizedEmail);
+        return { success: false, error: 'No verification code found for this email. Please request a new code.' };
+      }
+
+      // Check if code has expired
+      if (Date.now() > storedOTP.expiresAt) {
+        console.log('Code expired for email:', normalizedEmail);
+        await OTP.deleteOne({ email: normalizedEmail });
+        return { success: false, error: 'Verification code has expired. Please request a new code.' };
+      }
+
+      // Check attempts
+      if (storedOTP.attempts >= 3) {
+        console.log('Too many attempts for email:', normalizedEmail);
+        await OTP.deleteOne({ email: normalizedEmail });
+        return { success: false, error: 'Too many verification attempts. Please request a new code.' };
+      }
+
+      // Increment attempts
+      storedOTP.attempts += 1;
+      await storedOTP.save();
+      console.log('Attempts:', storedOTP.attempts);
+
+      // Compare codes (strict string comparison)
+      const isValid = storedOTP.code === cleanCode;
+      console.log('Code verification result:', isValid);
+      
+      if (isValid) {
+        console.log('Code verified successfully for email:', normalizedEmail);
+        // Mark the code as verified but don't delete it yet
+        storedOTP.verified = true;
+        await storedOTP.save();
+        return { success: true };
+      } else {
+        console.log('Invalid code for email:', normalizedEmail);
+        return { success: false, error: 'Invalid verification code. Please try again.' };
+      }
+    } catch (error) {
+      console.error('Error verifying code:', error);
+      return { success: false, error: error.message || 'Error verifying code' };
+    }
+  }
+
+  // New method to delete OTP after successful registration
+  async deleteOTP(email) {
+    try {
+      const normalizedEmail = email.toLowerCase();
+      await OTP.deleteOne({ email: normalizedEmail });
+      console.log('OTP deleted for email:', normalizedEmail);
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting OTP:', error);
+      return { success: false, error: error.message || 'Error deleting OTP' };
+    }
   }
 }
 
-// Export the class instead of a singleton instance
-module.exports = EmailService; 
+module.exports = new EmailService(); 

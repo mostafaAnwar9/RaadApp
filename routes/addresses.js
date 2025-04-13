@@ -17,18 +17,18 @@ router.get('/:id', async (req, res) => {
 
 router.get('/user-stores/:userId', async (req, res) => {
   try {
-      const userAddress = await Address.findOne({ userId: req.params.userId });
+    const userAddress = await Address.findOne({ userId: req.params.userId });
 
-      if (!userAddress) {
-          return res.status(404).json({ error: 'User address not found' });
-      }
+    if (!userAddress) {
+      return res.status(404).json({ error: 'User address not found' });
+    }
 
-      const stores = await Store.find({ deliveryAreas: userAddress.area });
+    const stores = await Store.find({ deliveryAreas: userAddress.zone });
 
-      res.status(200).json(stores);
+    res.status(200).json(stores);
   } catch (error) {
-      console.error('Error fetching user stores:', error);
-      res.status(500).json({ error: 'Internal Server Error' });
+    console.error('Error fetching user stores:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -36,34 +36,73 @@ router.get('/user-stores/:userId', async (req, res) => {
 // 🟢 إضافة عنوان جديد
 router.post('/add', async (req, res) => {
   try {
-      console.log("Received request body:", req.body); // 🔍 تحقق مما يتم استقباله
-      const { userId, buildingName, apartmentNumber, floorNumber, street, landmark, addressLabel, area, latitude, longitude } = req.body;
-      
-      if (!userId || !latitude || !longitude) {
-          return res.status(400).json({ error: "Missing required fields" });
-      }
-
-      const newAddress = new Address({
-          userId,
-          buildingName,
-          apartmentNumber,
-          floorNumber,
-          street,
-          landmark,
-          addressLabel,
-          area,
-          location: {
-            latitude: req.body.latitude,
-            longitude: req.body.longitude,
-          }
+    console.log("Received request body:", req.body);
+    const { userId, governorate, city, detailedAddress, zone, latitude, longitude } = req.body;
+    
+    // Validate required fields
+    if (!userId || !latitude || !longitude || !governorate || !city || !detailedAddress || !zone) {
+      console.log("Missing fields:", {
+        userId: !!userId,
+        latitude: !!latitude,
+        longitude: !!longitude,
+        governorate: !!governorate,
+        city: !!city,
+        detailedAddress: !!detailedAddress,
+        zone: !!zone
       });
+      return res.status(400).json({ 
+        success: false,
+        message: "يرجى ملء جميع الحقول المطلوبة",
+        error: "Missing required fields" 
+      });
+    }
 
-      await newAddress.save();
-      res.status(200).json({ message: "Address added successfully", newAddress });
+    // Validate governorate and city values
+    if (!['القاهرة'].includes(governorate)) {
+      return res.status(400).json({
+        success: false,
+        message: "المحافظة غير صالحة",
+        error: "Invalid governorate"
+      });
+    }
+
+    if (!['العاصمة الإدارية'].includes(city)) {
+      return res.status(400).json({
+        success: false,
+        message: "المدينة غير صالحة",
+        error: "Invalid city"
+      });
+    }
+
+    const newAddress = new Address({
+      userId,
+      governorate,
+      city,
+      detailedAddress,
+      zone,
+      location: {
+        latitude,
+        longitude,
+      }
+    });
+
+    console.log("Saving new address:", newAddress);
+    const savedAddress = await newAddress.save();
+    console.log("Address saved successfully:", savedAddress);
+
+    res.status(200).json({ 
+      success: true,
+      message: "تم إضافة العنوان بنجاح",
+      address: savedAddress 
+    });
 
   } catch (error) {
-      console.error("Error adding address:", error);
-      res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error adding address:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "حدث خطأ أثناء إضافة العنوان",
+      error: error.message 
+    });
   }
 });
 

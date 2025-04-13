@@ -17,12 +17,14 @@ const PORT = process.env.PORT || 5000;
 // Global CORS middleware - must be before any routes
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, store-id');
   res.header('Access-Control-Allow-Credentials', 'true');
   
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, store-id');
     return res.status(204).end();
   }
   
@@ -32,7 +34,7 @@ app.use((req, res, next) => {
 // Also use the cors package for additional CORS handling
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'store-id'],
   credentials: true,
   preflightContinue: false,
@@ -62,8 +64,8 @@ const upload = multer({ storage });
 const server = http.createServer(app);
 const io = socketIo(server, { 
     cors: { 
-        origin: "*", // السماح بالاتصال من أي مصدر
-        methods: ["GET", "POST"], // السماح بهذه الطرق
+        origin: "*",
+        methods: ["GET", "POST"],
         allowedHeaders: ["Content-Type"], 
         credentials: true 
     }
@@ -73,13 +75,10 @@ const io = socketIo(server, {
 io.on('connection', (socket) => {
     console.log(`🔗 مستخدم متصل: ${socket.id}`);
 
-    socket.on('get_orders', async () => {
-        try {
-            const orders = await Order.find();
-            socket.emit('orders_list', JSON.stringify(orders)); // 🔥 تأكد من إرسال JSON صالح
-        } catch (error) {
-            console.error("❌ خطأ في استرجاع الطلبات:", error);
-        }
+    // انضمام المتجر إلى غرفة خاصة
+    socket.on('join_store', (storeId) => {
+        socket.join(storeId);
+        console.log(`🏪 المتجر ${storeId} انضم إلى غرفته الخاصة`);
     });
 
     socket.on('disconnect', () => {
@@ -196,6 +195,9 @@ const emailRoutes = require('./routes/email');
 console.log("✅ Route Loaded: /email");
 app.use('/email', emailRoutes);
 
+const categoryRoutes = require('./routes/categories');
+console.log("✅ Route Loaded: /categories");
+app.use('/categories', categoryRoutes);
 
 // ✅ نقطة النهاية الرئيسية
 app.get('/', (req, res) => {

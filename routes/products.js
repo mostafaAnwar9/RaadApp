@@ -28,152 +28,174 @@ router.options('*', (req, res) => {
   res.status(204).end();
 });
 
-// ✅ 1. جلب المنتجات الخاصة بصاحب المتجر فقط
+// Get all products with optional storeId and categoryId filters
 router.get('/', verifyToken, async (req, res) => {
-    try {
-        console.log("🔍 [GET /products] User Info:", req.user);
+  try {
+    const { storeId } = req.query;
+    const query = {};
 
-        const storeId = req.headers['store-id'];
-        if (!storeId) {
-         return res.status(400).json({ message: 'storeId is required' });
-}
-
-
-        if (!storeId) {
-            return res.status(400).json({ message: 'storeId is required' });
-        }
-
-        if (req.user.role === 'owner') {
-            // إذا كان المستخدم مالك المتجر، نعرض له المنتجات الخاصة به فقط
-            const products = await Product.find({ storeId: storeId });
-            res.json(products);
-        } else if (req.user.role === 'customer') {
-            // إذا كان المستخدم عميل، يمكنه فقط رؤية المنتجات بدون التحقق من الـ storeId
-            const products = await Product.find({ storeId: storeId });
-            res.json(products);
-        } else {
-            return res.status(403).json({ message: 'Unauthorized - Invalid role' });
-        }
-    } catch (error) {
-        console.error("❌ Error fetching products:", error);
-        res.status(500).json({ message: 'Server Error' });
+    // Add storeId to query if provided
+    if (storeId) {
+      query.storeId = storeId;
     }
+
+    const products = await Product.find(query)
+      .populate('categoryId', 'name')
+      .sort({ createdAt: -1 });
+
+    res.json(products);
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ message: error.message });
+  }
 });
 
-
-
-// ✅ 2. جلب المتجر الخاص بالأونر بناءً على الـ ID الخاص به
+// Get store ID by owner ID
 router.get('/ownerId/:ownerId', async (req, res) => {
-    try {
-        const { ownerId } = req.params;
+  try {
+    const { ownerId } = req.params;
 
-        if (!ownerId.match(/^[0-9a-fA-F]{24}$/)) {
-            return res.status(400).json({ error: 'Invalid owner ID' });
-        }
-
-        const store = await Store.findOne({ ownerId: ownerId });
-
-        if (!store) {
-            return res.status(404).json({ error: 'Store not found' });
-        }
-
-        res.status(200).json({ storeId: store._id });
-    } catch (error) {
-        console.error('❌ Error fetching store ID:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+    if (!ownerId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ error: 'Invalid owner ID' });
     }
+
+    const store = await Store.findOne({ ownerId: ownerId });
+
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+
+    res.status(200).json({ storeId: store._id });
+  } catch (error) {
+    console.error('Error fetching store ID:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
-// ✅ 3. إضافة منتج جديد
-router.post('/add', 
-    verifyToken,
-    body('name').notEmpty().withMessage('Product name is required'),
-    body('price').isFloat({ gt: 0 }).withMessage('Price must be a positive number'),
-    async (req, res) => {
-        try {
-            console.log("🔍 [POST /add] User Info:", req.user);
+// Create a new product
+router.post('/', verifyToken, async (req, res) => {
+  try {
+    const { name, description, price, imageUrl, storeId, categoryId, isAvailable, stock } = req.body;
 
-            if (!req.user || req.user.role !== 'owner') {
-                return res.status(403).json({ message: 'Unauthorized - Not an owner' });
-            }
-
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json({ errors: errors.array() });
-            }
-
-            // البحث عن المتجر الخاص بالأونر
-            const store = await Store.findOne({ ownerId: req.user._id });
-            if (!store) {
-                return res.status(404).json({ message: 'Store not found' });
-            }
-
-            const { name, price, storeId, imageUrl } = req.body;
-            const newProduct = new Product({ name, price, storeId: store._id, imageUrl });
-            await newProduct.save();
-
-            res.status(201).json(newProduct);
-        } catch (error) {
-            console.error("❌ Error adding product:", error);
-            res.status(500).json({ message: 'Error adding product' });
-        }
+    // Validate required fields
+    if (!name || !price || !storeId) {
+      return res.status(400).json({ 
+        message: 'Name, price, and storeId are required' 
+      });
     }
-);
 
-// ✅ 4. تعديل المنتج
+    const product = new Product({
+      name,
+      description,
+      price,
+      imageUrl,
+      storeId,
+      categoryId,
+      isAvailable,
+      stock
+    });
+
+    await product.save();
+    res.status(201).json(product);
+  } catch (error) {
+    console.error('Error creating product:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update a product
+router.put('/:id', verifyToken, async (req, res) => {
+  try {
+    const { name, description, price, imageUrl, categoryId, isAvailable, stock } = req.body;
+    
+    // Validate required fields
+    if (!name || !price) {
+      return res.status(400).json({ 
+        message: 'Name and price are required' 
+      });
+    }
+
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      {
+        name,
+        description,
+        price,
+        imageUrl,
+        categoryId,
+        isAvailable,
+        stock
+      },
+      { new: true }
+    ).populate('categoryId', 'name');
+
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.json(product);
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Add PATCH route for partial updates
 router.patch('/:id', verifyToken, async (req, res) => {
-    try {
-        console.log("🔍 [PATCH /:id] User Info:", req.user);
-
-        const storeId = req.headers['store-id']; // ✅ استقبال storeId من الـ headers
-
-        if (!storeId) {
-            return res.status(400).json({ message: 'storeId is required' });
-        }
-
-        const product = await Product.findOne({ _id: req.params.id, storeId: storeId });
-
-        if (!product) {
-            return res.status(404).json({ message: 'Product not found or does not belong to your store' });
-        }
-
-        if (req.body.name) product.name = req.body.name;
-        if (req.body.price) product.price = req.body.price;
-
-        await product.save();
-        res.json({ message: 'Product updated successfully', product });
-    } catch (error) {
-        console.error("❌ Error updating product:", error);
-        res.status(500).json({ message: 'Server Error' });
+  try {
+    const { name, description, price, imageUrl, categoryId, isAvailable, stock } = req.body;
+    
+    // Validate required fields if they are being updated
+    if (name !== undefined && !name) {
+      return res.status(400).json({ message: 'Name cannot be empty' });
     }
+    if (price !== undefined && !price) {
+      return res.status(400).json({ message: 'Price cannot be empty' });
+    }
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (price !== undefined) updateData.price = price;
+    if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
+    if (categoryId !== undefined) updateData.categoryId = categoryId;
+    if (isAvailable !== undefined) updateData.isAvailable = isAvailable;
+    if (stock !== undefined) updateData.stock = stock;
+
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    ).populate('categoryId', 'name');
+
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.json(product);
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({ message: error.message });
+  }
 });
 
-
-// ✅ 5. حذف المنتج
+// Delete a product
 router.delete('/:id', verifyToken, async (req, res) => {
-    try {
-        console.log("🔍 [DELETE /:id] User Info:", req.user);
+  try {
+    const product = await Product.findById(req.params.id);
 
-        const storeId = req.headers['store-id']; // ✅ استقبال storeId من الـ headers
-
-        if (!storeId) {
-            return res.status(400).json({ message: 'storeId is required' });
-        }
-
-        const product = await Product.findOne({ _id: req.params.id, storeId: storeId });
-
-        if (!product) {
-            return res.status(404).json({ message: 'Product not found or does not belong to your store' });
-        }
-
-        await Product.findByIdAndDelete(req.params.id);
-
-        res.json({ message: 'Product deleted successfully' });
-    } catch (error) {
-        console.error("❌ Error deleting product:", error);
-        res.status(500).json({ message: 'Server Error' });
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
     }
-});
 
+    // Actually delete the product from the database
+    await Product.findByIdAndDelete(req.params.id);
+
+    res.json({ message: 'Product deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 module.exports = router;

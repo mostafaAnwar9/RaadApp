@@ -64,24 +64,37 @@ router.get('/:storeId', async (req, res) => {
     }
 });
 
-
 router.get('/category/:category', async (req, res) => {
     try {
         const category = req.params.category;
-        const { area } = req.query;
+        const { zone } = req.query;
 
-        if (!area) {
+        // Validate category
+        const validCategories = ['restaurant', 'pharmacy', 'supermarket', 'other'];
+        if (!validCategories.includes(category)) {
+            return res.status(400).json({ error: 'Invalid category' });
+        }
+
+        if (!zone) {
             return res.status(400).json({ success: false, message: 'يجب تحديد المنطقة' });
         }
 
-        // جلب المتاجر التي تحتوي على المنطقة المحددة
-        const deliveries = await Delivery.find({ 'zones.area': area }).select('storeId');
+        // Get stores that deliver to the specified zone
+        const deliveries = await Delivery.find({
+            'zones': {
+                $elemMatch: {
+                    'area': zone
+                }
+            }
+        }).select('storeId');
+
         const storeIds = deliveries.map(d => d.storeId);
 
+        // Get stores that match both the category and deliver to the zone
         const stores = await Store.find({
             category,
             _id: { $in: storeIds }
-        });
+        }).populate('ownerId', 'name email');
 
         res.json(stores);
     } catch (error) {
@@ -108,26 +121,6 @@ router.get('/ownerId/:ownerId', async (req, res) => {
         res.status(200).json(store);
     } catch (error) {
         console.error('Error fetching store:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-});
-
-router.get('/category/:category', async (req, res) => {
-    try {
-        const { category } = req.params;
-
-      
-        const validCategories = ['restaurant', 'pharmacy', 'supermarket', 'other'];
-        if (!validCategories.includes(category)) {
-            return res.status(400).json({ error: 'Invalid category' });
-        }
-
-       
-        const stores = await Store.find({ category });
-
-        res.status(200).json(stores);
-    } catch (error) {
-        console.error('Error fetching stores by category:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });

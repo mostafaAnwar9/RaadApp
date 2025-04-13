@@ -9,6 +9,8 @@ const { v4: uuidv4 } = require('uuid');
 const mongoose = require('mongoose');
 const Address = require('../models/Address');
 const auth = require('../routes/auth');
+const categories = require('../routes/categories');
+const category = require('../models/Category');
 
 //const WebSocket = require('ws');
 
@@ -78,7 +80,7 @@ router.get('/my-orders', async (req, res) => {
         
         const orders = await StoreOrder.find({
             userId: userId,
-            status: { $in: ['pending', 'accepted', 'preparing', 'ready', 'rejected'] }
+            status: { $in: ['pending', 'accepted', 'preparing', 'ready', 'delivered', 'rejected'] }
         })
         .populate('items.productId', 'name price imageUrl')
         .populate('addressId')
@@ -142,17 +144,30 @@ router.options('*', (req, res) => {
 });
 
 router.get('/:storeId/pending', async (req, res) => {
-    try {
-        const storeId = req.params.storeId;
-        const orders = await StoreOrder.find({ storeId, status: 'pending' })
-            .populate('items.productId', 'name price imageUrl') // ✅ جلب تفاصيل المنتجات
-            .populate('addressId') // ✅ جلب بيانات العنوان كاملة
+  try {
+    const storeId = req.params.storeId;
+    console.log('🔍 Fetching pending orders for store:', storeId);
+    
+    const orders = await StoreOrder.find({
+      storeId: storeId,
+      status: 'pending'
+    })
+    .populate('addressId')
+    .populate('items.productId')
+    .sort({ createdAt: -1 });
 
-        res.json(orders);
-    } catch (error) {
-        console.error('❌ Error fetching orders:', error);
-        res.status(500).json({ error: 'Internal server error' });
+    console.log('✅ Found orders:', orders.length);
+    if (orders.length > 0) {
+      console.log('📍 First order data:', JSON.stringify(orders[0], null, 2));
+      console.log('📍 First order address:', orders[0].addressId);
+      console.log('📍 First order address fields:', Object.keys(orders[0].addressId._doc));
     }
+
+    res.json(orders);
+  } catch (error) {
+    console.error('❌ Error fetching store orders:', error);
+    res.status(500).json({ message: 'Error fetching store orders' });
+  }
 });
 
 router.put('/updateOrderStatus', async (req, res) => {
@@ -160,45 +175,196 @@ router.put('/updateOrderStatus', async (req, res) => {
         const { orderId, status } = req.body;
         
         if (!orderId || !status) {
-            return res.status(400).json({ error: 'Order ID and status are required' });
+            return res.status(400).json({ 
+                error: 'Order ID and status are required',
+                message: 'Please provide both orderId and status'
+            });
         }
         
         if (!mongoose.Types.ObjectId.isValid(orderId)) {
-            return res.status(400).json({ error: 'Invalid order ID' });
+            return res.status(400).json({ 
+                error: 'Invalid order ID',
+                message: 'The provided order ID is not valid'
+            });
         }
         
-        const validStatuses = ['pending', 'accepted', 'preparing', 'ready', 'delivered', 'rejected'];
+        const validStatuses = ['canceled', 'pending', 'accepted', 'preparing', 'ready', 'delivered', 'rejected'];
         if (!validStatuses.includes(status)) {
-            return res.status(400).json({ error: 'Invalid status' });
+            return res.status(400).json({ 
+                error: 'Invalid status',
+                message: `Status must be one of: ${validStatuses.join(', ')}`
+            });
         }
         
-        const updatedOrder = await StoreOrder.findByIdAndUpdate(
-            orderId, 
-            { status },
-            { new: true }
-        ).populate('items.productId', 'name price imageUrl')
-         .populate('addressId');
-        
-        if (!updatedOrder) {
-            return res.status(404).json({ error: 'Order not found' });
+        const order = await StoreOrder.findById(orderId);
+        if (!order) {
+            return res.status(404).json({ 
+                error: 'Order not found',
+                message: 'No order found with the provided ID'
+            });
+        }
+
+        // Prevent canceling non-pending orders
+        if (status === 'canceled' && order.status !== 'pending') {
+            return res.status(400).json({ 
+                error: 'Cannot cancel order',
+                message: 'Only pending orders can be canceled'
+            });
+        }
+
+        // Check if order is within cancellation window (1 minute)
+        if (status === 'canceled') {
+            const orderTime = new Date(order.createdAt);
+            const now = new Date();
+            const difference = now - orderTime;
+            const minutes = difference / (1000 * 60);
+            
+            if (minutes > 1) {
+                return res.status(400).json({ 
+                    error: 'Cancellation window expired',
+                    message: 'Orders can only be canceled within 1 minute of creation'
+                });
+            }
+        }
+
+        // تحديث حالة الطلب
+        order.status = status;
+        await order.save();
+
+        // جلب البيانات المحدثة مع العلاقات
+        const updatedOrder = await StoreOrder.findById(orderId)
+            .populate('items.productId', 'name price imageUrl')
+            .populate('addressId')
+            .populate('storeId');
+
+        // إرسال إشعار بتغيير حالة الطلب
+        if (req.app.get('io')) {
+            const io = req.app.get('io');
+            io.emit('orderStatusChanged', {
+                orderId: updatedOrder._id,
+                status: status,
+                storeId: updatedOrder.storeId
+            });
+            
+            // إرسال إشعار خاص للمتجر
+            io.to(updatedOrder.storeId.toString()).emit('orderStatusChanged', {
+                orderId: updatedOrder._id,
+                status: status,
+                storeId: updatedOrder.storeId
+            });
         }
         
-        res.status(200).json(updatedOrder);
+        res.status(200).json({
+            message: 'Order status updated successfully',
+            order: updatedOrder
+        });
     } catch (error) {
         console.error('❌ Error updating order status:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ 
+            error: 'Internal Server Error',
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
+// Get all orders for a store with pagination
+router.get('/store/:storeId', async (req, res) => {
+    try {
+        const storeId = req.params.storeId;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        console.log('🔍 Fetching orders for store:', storeId);
+        console.log('📊 Page:', page, 'Limit:', limit);
+
+        // First, verify the store exists
+        const store = await Store.findById(storeId);
+        if (!store) {
+            console.log('❌ Store not found:', storeId);
+            return res.status(404).json({ 
+                error: 'Store not found',
+                message: 'The specified store does not exist'
+            });
+        }
+
+        console.log('✅ Store found:', store.name);
+
+        const totalOrders = await StoreOrder.countDocuments({ storeId });
+        const totalPages = Math.ceil(totalOrders / limit);
+
+        console.log('📈 Total orders:', totalOrders);
+        console.log('📈 Total pages:', totalPages);
+
+        const orders = await StoreOrder.find({ storeId })
+            .populate('items.productId', 'name price imageUrl')
+            .populate('addressId')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        console.log('✅ Found orders:', orders.length);
+
+        res.json({
+            orders,
+            currentPage: page,
+            totalPages,
+            totalOrders
+        });
+    } catch (error) {
+        console.error('❌ Error fetching store orders:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
+// Delete an order (only if status is rejected or canceled)
+router.delete('/:orderId', async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        
+        const order = await StoreOrder.findById(orderId);
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status !== 'rejected' && order.status !== 'canceled') {
+            return res.status(400).json({ 
+                error: 'Cannot delete order',
+                message: 'Only rejected or canceled orders can be deleted'
+            });
+        }
+
+        await StoreOrder.findByIdAndDelete(orderId);
+        res.status(200).json({ message: 'Order deleted successfully' });
+    } catch (error) {
+        console.error('❌ Error deleting order:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 // 🔹 إنشاء طلب جديد
 
 module.exports = (io) => {
+    // تخزين io في التطبيق
+    router.use((req, res, next) => {
+        req.app.set('io', io);
+        next();
+    });
+
     router.post('/placeStoreOrder', async (req, res) => {
         try {
-            const { storeId, userId, addressId, phoneNumber, delivery, items, paymentMethod, notes, deliveryTime, username } = req.body;
+            const { storeId, userId, addressId, phoneNumber, delivery, items, paymentMethod, notes, deliveryTime, username, orderTotal, itemsPrice } = req.body;
     
-            if (!storeId || !userId || !addressId || !phoneNumber || !items.length || !username || !deliveryTime) {
-                return res.status(400).json({ error: 'Missing required fields' });
+            if (!storeId || !userId || !addressId || !phoneNumber || !items.length || !username || !deliveryTime || !orderTotal || !itemsPrice) {
+                return res.status(400).json({ 
+                    error: 'Missing required fields',
+                    message: 'Please provide all required fields: storeId, userId, addressId, phoneNumber, items, username, deliveryTime, orderTotal, itemsPrice'
+                });
             }
     
             const store = await Store.findById(storeId);
@@ -211,16 +377,13 @@ module.exports = (io) => {
                 return res.status(404).json({ error: 'Address not found' });
             }
     
-            // تحويل productId إلى ObjectId
             const formattedItems = items.map(item => ({
                 productId: new mongoose.Types.ObjectId(item.productId),
                 quantity: item.quantity,
                 price: item.price,
+                category: item.category || "غير مصنف",
+                categoryId: item.categoryId ? new mongoose.Types.ObjectId(item.categoryId) : null
             }));
-    
-            // حساب إجمالي الأسعار
-            const itemsPrice = formattedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-            const orderTotal = itemsPrice + delivery;  // إضافة تكلفة التوصيل إلى إجمالي الطلب
     
             const order = new StoreOrder({
                 storeId: new mongoose.Types.ObjectId(storeId),
@@ -232,32 +395,41 @@ module.exports = (io) => {
                 items: formattedItems,
                 paymentMethod,
                 notes,
-                deliveryTime,
-                orderTotal,  // إضافة الـ orderTotal
-                itemsPrice,  // إضافة الـ itemsPrice
+                deliveryTime: new Date(deliveryTime),
+                orderTotal,
+                itemsPrice,
                 status: 'pending',
-                createdAt: new Date(),
-                trackingNumber: uuidv4(),
             });
     
             await order.save();
     
             const orderData = {
                 orderId: order._id,
+                orderNumber: order.orderNumber,
+                trackingNumber: order.trackingNumber,
                 storeId,
                 userId,
                 address,
                 phoneNumber,
                 items: formattedItems,
-                total: orderTotal,  // استخدام orderTotal هنا
+                total: orderTotal,
                 status: 'pending',
             };
     
+            // إرسال إشعار للجميع
             io.emit('new_order', orderData);
+            
+            // إرسال إشعار خاص للمتجر
+            io.to(storeId).emit('new_order', orderData);
+            
             res.status(200).json(orderData);
         } catch (error) {
             console.error('❌ Error placing order:', error);
-            res.status(500).json({ error: 'Internal Server Error', message: error.message });
+            res.status(500).json({ 
+                error: 'Internal Server Error', 
+                message: error.message,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            });
         }
     });    
 

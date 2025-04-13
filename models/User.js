@@ -13,6 +13,13 @@ const userSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
+  emailVerified: {
+    type: Boolean,
+    default: false,
+    required: function() {
+      return this.email != null && this.email.trim() !== '';
+    }
+  },
   password: {
     type: String,
     required: false,
@@ -30,7 +37,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['customer', 'vendor', 'admin'],
+    enum: ['customer', 'delivery', 'owner'],
     default: 'customer'
   },
   createdAt: {

@@ -99,43 +99,54 @@ router.post('/verify-code', async (req, res) => {
   console.log('Received verify-code request:', req.body);
   
   try {
-    const { verificationCode, userData } = req.body;
+    const { verificationCode, phoneNumber, userData } = req.body;
     
     if (!verificationCode) {
-      return res.status(400).json({ error: 'Verification code is required' });
-    }
-
-    // Validate code format
-    if (!/^\d{6}$/.test(verificationCode)) {
-      return res.status(400).json({ error: 'Code must be exactly 6 digits' });
-    }
-
-    // Get the phone number from the OTP store
-    let phoneNumber = null;
-    for (const [key, value] of whatsappService.otpStore.entries()) {
-      if (value.code === verificationCode) {
-        phoneNumber = key;
-        break;
-      }
+      return res.status(400).json({ 
+        success: false,
+        error: 'Verification code is required' 
+      });
     }
 
     if (!phoneNumber) {
-      return res.status(400).json({ error: 'Invalid verification code' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Phone number is required' 
+      });
     }
 
+    // Clean and validate phone number
+    const cleanPhoneNumber = cleanAndValidatePhone(phoneNumber);
+    console.log('Cleaned phone number:', cleanPhoneNumber);
+
+    // Validate code format
+    if (!/^\d{6}$/.test(verificationCode)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Code must be exactly 6 digits' 
+      });
+    }
+
+    console.log('Verifying code for phone:', cleanPhoneNumber);
+    console.log('Code:', verificationCode);
+    console.log('Code type:', typeof verificationCode);
+    console.log('Code length:', verificationCode.length);
+    console.log('OTP Store before verification:', Array.from(whatsappService.otpStore.entries()));
+
     // Verify code
-    const isValid = whatsappService.verifyCode(phoneNumber, verificationCode);
+    const isValid = whatsappService.verifyCode(cleanPhoneNumber, verificationCode);
+    console.log('Verification result:', isValid);
     
     if (!isValid) {
-      return res.status(400).json({ error: 'Invalid verification code' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid verification code' 
+      });
     }
 
     // If user data is provided, create the user
     if (userData) {
       const { username, password, role, email } = userData;
-      
-      // Clean the phone number
-      const cleanPhoneNumber = phoneNumber.replace(/\D/g, '');
       
       // Create user object
       const userObj = {
@@ -161,6 +172,7 @@ router.post('/verify-code', async (req, res) => {
         success: true, 
         message: 'Phone number verified and user created successfully',
         user: {
+          _id: newUser._id,
           username: newUser.username,
           email: newUser.email || null,
           role: newUser.role,
@@ -174,24 +186,15 @@ router.post('/verify-code', async (req, res) => {
 
     return res.json({ 
       success: true, 
-      message: 'Phone number verified successfully'
+      message: 'Phone number verified successfully',
+      phoneVerified: true
     });
   } catch (error) {
-    console.error('Error in verify-code route:', error);
-    
-    if (error.code === 11000) {
-      let errorMessage = 'This record already exists.';
-      if (error.keyPattern) {
-        if (error.keyPattern.phonenumber) {
-          errorMessage = 'This phone number is already registered. Please use a different phone number or try logging in.';
-        } else if (error.keyPattern.username) {
-          errorMessage = 'This username is already taken. Please choose a different username.';
-        }
-      }
-      return res.status(400).json({ error: errorMessage });
-    }
-    
-    return res.status(500).json({ error: 'Failed to verify code: ' + error.message });
+    console.error('Error in verify-code:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'An error occurred during verification: ' + error.message 
+    });
   }
 });
 

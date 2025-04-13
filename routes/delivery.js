@@ -8,6 +8,26 @@ const toObjectId = (id) => {
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
 };
 
+// Get all available zones
+router.get('/zones', async (req, res) => {
+  try {
+    const deliveries = await Delivery.find().select('zones');
+    const allZones = deliveries.reduce((acc, delivery) => {
+      delivery.zones.forEach(zone => {
+        if (!acc.some(z => z.area === zone.area)) {
+          acc.push(zone);
+        }
+      });
+      return acc;
+    }, []);
+
+    res.json(allZones);
+  } catch (error) {
+    console.error("❌ Error fetching zones:", error);
+    res.status(500).json({ success: false, message: 'خطأ في جلب المناطق' });
+  }
+});
+
 router.get('/:storeId/:area', async (req, res) => {
   try {
     const { storeId, area } = req.params;
@@ -98,4 +118,5 @@ router.delete('/delete/:storeId/:area', async (req, res) => {
     res.status(500).json({ success: false, message: 'خطأ أثناء الحذف', error });
   }
 });
+
 module.exports = router;
