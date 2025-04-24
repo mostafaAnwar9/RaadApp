@@ -199,6 +199,10 @@ const categoryRoutes = require('./routes/categories');
 console.log("✅ Route Loaded: /categories");
 app.use('/categories', categoryRoutes);
 
+const supportRoutes = require('./routes/support');
+console.log("✅ Route Loaded: /support");
+app.use('/support', supportRoutes); 
+
 // ✅ نقطة النهاية الرئيسية
 app.get('/', (req, res) => {
     res.send('Welcome to the delivery app backend');

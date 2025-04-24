@@ -7,6 +7,7 @@ const Store = require('../models/Store');
 const WhatsAppService = require('../services/whatsapp.service');
 const emailService = require('../services/email.service');
 const cors = require('cors');
+const Admin = require('../models/Admin');
 
 const router = express.Router();
 
@@ -38,6 +39,34 @@ const verifyToken = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
+    res.status(401).json({ message: 'Invalid Token' });
+  }
+};
+
+// Middleware to verify admin token
+const verifyAdminToken = async (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'Access Denied' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Decoded token:', decoded); // Debug log
+
+    if (!decoded.adminId) {
+      return res.status(401).json({ message: 'Invalid Admin Token' });
+    }
+
+    const admin = await Admin.findById(decoded.adminId);
+    if (!admin) {
+      return res.status(401).json({ message: 'Admin not found' });
+    }
+
+    req.admin = admin;
+    next();
+  } catch (error) {
+    console.error('Token verification error:', error); // Debug log
     res.status(401).json({ message: 'Invalid Token' });
   }
 };
@@ -306,8 +335,7 @@ router.options('/login', (req, res) => {
 // Login user
 router.post('/login', async (req, res) => {
   console.log('🔍 Login attempt:', { 
-    email: req.body.email, 
-    phoneNumber: req.body.phoneNumber,
+    email: req.body.email,
     phonenumber: req.body.phonenumber,
     password: req.body.password ? '***' : 'undefined'
   });
@@ -317,7 +345,7 @@ router.post('/login', async (req, res) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
 
-  const { email, phoneNumber, phonenumber, password } = req.body;
+  const { email, phonenumber, password } = req.body;
 
   if (!password) {
     return res.status(400).json({ 
@@ -327,7 +355,7 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  if (!email && !phoneNumber && !phonenumber) {
+  if (!email && !phonenumber) {
     return res.status(400).json({ 
       success: false,
       message: "Either email or phone number is required",
@@ -341,11 +369,11 @@ router.post('/login', async (req, res) => {
       user = await User.findOne({ email });
     } else {
       // Clean the phone number (remove non-digits) and validate length
-      const cleanPhoneNumber = (phoneNumber || phonenumber).replace(/\D/g, '');
-      if (cleanPhoneNumber.length !== 11) {
+      const cleanPhoneNumber = phonenumber.replace(/\D/g, '');
+      if (phonenumber && (cleanPhoneNumber.length !== 11 || !cleanPhoneNumber.startsWith('01'))) {
         return res.status(400).json({ 
           success: false,
-          message: "Phone number must be exactly 11 digits",
+          message: "Phone number must be exactly 11 digits starting with 01",
           error: "INVALID_PHONE_FORMAT"
         });
       }
@@ -353,7 +381,7 @@ router.post('/login', async (req, res) => {
     }
 
     if (!user) {
-      console.log('❌ User not found:', email || phoneNumber || phonenumber);
+      console.log('❌ User not found:', email || phonenumber);
       return res.status(404).json({ 
         success: false,
         message: "User not found. Please check your credentials or sign up.",
@@ -362,7 +390,7 @@ router.post('/login', async (req, res) => {
     }
 
     if (user.role === 'delivery' && user.status === 'pending') {
-      console.log('⚠️ Delivery account pending:', email || phoneNumber || phonenumber);
+      console.log('⚠️ Delivery account pending:', email || phonenumber);
       return res.status(403).json({ 
         success: false,
         message: 'Your delivery account is pending approval.',
@@ -385,7 +413,7 @@ router.post('/login', async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      console.log('❌ Invalid password for user:', email || phoneNumber || phonenumber);
+      console.log('❌ Invalid password for user:', email || phonenumber);
       return res.status(400).json({ 
         success: false,
         message: "Incorrect password. Please try again.",
@@ -413,7 +441,7 @@ router.post('/login', async (req, res) => {
       if (store) {
         responseData.store_id = store._id;
       } else {
-        console.log('⚠️ No store found for owner:', email || phoneNumber || phonenumber);
+        console.log('⚠️ No store found for owner:', email || phonenumber);
         return res.status(404).json({ 
           success: false,
           message: "No store found for this owner.",
@@ -422,7 +450,7 @@ router.post('/login', async (req, res) => {
       }
     }
 
-    console.log('✅ Login successful for user:', email || phoneNumber || phonenumber);
+    console.log('✅ Login successful for user:', email || phonenumber);
     res.json(responseData);
   } catch (err) {
     console.error('❌ Login error:', err);
@@ -470,5 +498,129 @@ router.post('/verify-email', async (req, res) => {
   }
 });
 
+// Reset password endpoint
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { phoneNumber, email, verificationCode, newPassword } = req.body;
+
+    if (!verificationCode || !newPassword || (!phoneNumber && !email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code, new password, and either phone number or email are required'
+      });
+    }
+
+    // Find user by phone number or email
+    let user;
+    if (phoneNumber) {
+      const cleanedPhone = phoneNumber.replace(/\D/g, '');
+      user = await User.findOne({ phonenumber: cleanedPhone });
+    } else if (email) {
+      user = await User.findOne({ email: email.toLowerCase() });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Verify the code
+    if (phoneNumber) {
+      const phoneVerification = await whatsappService.verifyCode(phoneNumber, verificationCode);
+      if (!phoneVerification.success) {
+        return res.status(400).json({
+          success: false,
+          error: phoneVerification.error || 'Invalid verification code'
+        });
+      }
+    } else {
+      const emailVerification = await emailService.verifyCode(email, verificationCode);
+      if (!emailVerification.success) {
+        return res.status(400).json({
+          success: false,
+          error: emailVerification.error || 'Invalid verification code'
+        });
+      }
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+
+    // Generate a new token
+    const token = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+      data: {
+        token,
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          phonenumber: user.phonenumber,
+          role: user.role
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Password reset error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'An error occurred during password reset'
+    });
+  }
+});
+
+// Check if user exists by email or phone number
+router.post('/check-user', async (req, res) => {
+  try {
+    const { email, phoneNumber } = req.body;
+    
+    if (!email && !phoneNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'Either email or phone number is required'
+      });
+    }
+
+    let query = {};
+    
+    if (email) {
+      // Normalize email to lowercase
+      query.email = email.toLowerCase();
+    }
+    
+    if (phoneNumber) {
+      // Clean phone number (remove non-digits)
+      const cleanedPhone = phoneNumber.replace(/\D/g, '');
+      query.phonenumber = cleanedPhone;
+    }
+
+    const existingUser = await User.findOne(query);
+    
+    res.status(200).json({
+      success: true,
+      exists: !!existingUser,
+      message: existingUser ? 'User already exists' : 'User does not exist'
+    });
+  } catch (error) {
+    console.error('Error checking if user exists:', error);
+    res.status(500).json({
+      success: false,
+      error: 'An error occurred while checking if user exists'
+    });
+  }
+});
+
 module.exports = router;
 module.exports.verifyToken = verifyToken;
+module.exports.verifyAdminToken = verifyAdminToken;

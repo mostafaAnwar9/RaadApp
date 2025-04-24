@@ -8,6 +8,9 @@ const storeSchema = new mongoose.Schema({
     category: { type: String, enum: ['restaurant', 'pharmacy', 'supermarket', 'other'], required: true },
     openingHours: { type: String, required: true },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    storeStatus: { type: String, enum: ['open', 'busy', 'closed'], default: 'open' },
+    rating: { type: Number, default: 0 },
+    ratingCount: { type: Number, default: 0 },
 }, { timestamps: true });
 
 storeSchema.pre(/^find/, function(next) {

@@ -43,7 +43,15 @@ router.get('/', verifyToken, async (req, res) => {
       .populate('categoryId', 'name')
       .sort({ createdAt: -1 });
 
-    res.json(products);
+    // Ensure consistent data types
+    const formattedProducts = products.map(product => ({
+      ...product.toObject(),
+      price: Number(product.price),
+      stock: Number(product.stock),
+      isAvailable: Boolean(product.isAvailable)
+    }));
+
+    res.json(formattedProducts);
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ message: error.message });
@@ -84,15 +92,23 @@ router.post('/', verifyToken, async (req, res) => {
       });
     }
 
+    // Ensure price is a number
+    const numericPrice = Number(price);
+    if (isNaN(numericPrice)) {
+      return res.status(400).json({ 
+        message: 'Price must be a valid number' 
+      });
+    }
+
     const product = new Product({
       name,
       description,
-      price,
+      price: numericPrice,
       imageUrl,
       storeId,
       categoryId,
-      isAvailable,
-      stock
+      isAvailable: Boolean(isAvailable),
+      stock: Number(stock) || 0
     });
 
     await product.save();
@@ -115,16 +131,24 @@ router.put('/:id', verifyToken, async (req, res) => {
       });
     }
 
+    // Ensure price is a number
+    const numericPrice = Number(price);
+    if (isNaN(numericPrice)) {
+      return res.status(400).json({ 
+        message: 'Price must be a valid number' 
+      });
+    }
+
     const product = await Product.findByIdAndUpdate(
       req.params.id,
       {
         name,
         description,
-        price,
+        price: numericPrice,
         imageUrl,
         categoryId,
-        isAvailable,
-        stock
+        isAvailable: Boolean(isAvailable),
+        stock: Number(stock) || 0
       },
       { new: true }
     ).populate('categoryId', 'name');

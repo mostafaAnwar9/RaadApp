@@ -1,7 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const Address = require('../models/Address');
+const Store = require('../models/Store');
 
+// Define valid governorates and cities with their translations
+const validGovernorates = {
+  'cairo': {
+    'en': 'Cairo',
+    'ar': 'القاهرة'
+  }
+};
+
+const validCities = {
+  'newcapital': {
+    'en': 'New Capital',
+    'ar': 'العاصمة الإدارية'
+  }
+};
 
 router.get('/:id', async (req, res) => {
   try {
@@ -32,7 +47,6 @@ router.get('/user-stores/:userId', async (req, res) => {
   }
 });
 
-
 // 🟢 إضافة عنوان جديد
 router.post('/add', async (req, res) => {
   try {
@@ -58,7 +72,22 @@ router.post('/add', async (req, res) => {
     }
 
     // Validate governorate and city values
-    if (!['القاهرة'].includes(governorate)) {
+    console.log("Validating governorate:", governorate);
+    console.log("Valid governorates:", validGovernorates);
+    
+    // Normalize the governorate and city values
+    const normalizedGovernorate = governorate.toLowerCase().trim();
+    const normalizedCity = city.toLowerCase().trim();
+    
+    // Check if the governorate exists (case-insensitive)
+    const governorateKey = Object.keys(validGovernorates).find(
+      key => key.toLowerCase() === normalizedGovernorate || 
+             validGovernorates[key].en.toLowerCase() === normalizedGovernorate ||
+             validGovernorates[key].ar === governorate
+    );
+    
+    if (!governorateKey) {
+      console.log("Invalid governorate:", governorate);
       return res.status(400).json({
         success: false,
         message: "المحافظة غير صالحة",
@@ -66,7 +95,18 @@ router.post('/add', async (req, res) => {
       });
     }
 
-    if (!['العاصمة الإدارية'].includes(city)) {
+    console.log("Validating city:", city);
+    console.log("Valid cities:", validCities);
+    
+    // Check if the city exists (case-insensitive)
+    const cityKey = Object.keys(validCities).find(
+      key => key.toLowerCase() === normalizedCity || 
+             validCities[key].en.toLowerCase() === normalizedCity ||
+             validCities[key].ar === city
+    );
+    
+    if (!cityKey) {
+      console.log("Invalid city:", city);
       return res.status(400).json({
         success: false,
         message: "المدينة غير صالحة",
@@ -76,8 +116,8 @@ router.post('/add', async (req, res) => {
 
     const newAddress = new Address({
       userId,
-      governorate,
-      city,
+      governorate: governorateKey, // Use the found key
+      city: cityKey, // Use the found key
       detailedAddress,
       zone,
       location: {
@@ -105,7 +145,6 @@ router.post('/add', async (req, res) => {
     });
   }
 });
-
 
 router.put('/update/:id', async (req, res) => {
   try {

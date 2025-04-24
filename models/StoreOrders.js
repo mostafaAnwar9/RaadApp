@@ -42,7 +42,10 @@ const storeOrderSchema = new mongoose.Schema({
     required: true,
     index: true 
   },
+  deliveryOTP: { type: String, default: null }, // Add OTP field
   assignedDeliveryAgent: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryAgent' }, // عامل التوصيل
+  rating: { type: Number, min: 1, max: 5, default: null },
+  ratingComment: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

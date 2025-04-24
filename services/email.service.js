@@ -4,21 +4,25 @@ const OTP = require('../models/OTP');
 
 class EmailService {
   constructor() {
-    this.debugMode = false; // Ensure debug mode is disabled
+    this.debugMode = false;
     this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      secure: false,
+      tls: {
+        rejectUnauthorized: false
+      },
+      debug: false
     });
   }
 
   async sendVerificationCode(email) {
     try {
       console.log('Sending verification code to email:', email);
+      console.log('Using SMTP user:', process.env.SMTP_USER);
       
       // Normalize email to lowercase for case-insensitive comparison
       const normalizedEmail = email.toLowerCase();
@@ -66,8 +70,13 @@ class EmailService {
         `
       };
 
-      await this.transporter.sendMail(mailOptions);
-      console.log('Email sent successfully to:', email);
+      // Verify transporter configuration
+      await this.transporter.verify();
+      console.log('SMTP connection verified successfully');
+
+      // Send email
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('Email sent successfully:', info.response);
 
       return { success: true, message: 'Verification code sent successfully' };
     } catch (error) {

@@ -71,6 +71,13 @@ router.post('/verify-code', async (req, res) => {
       });
     }
 
+    // Update user's emailVerified status
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (user) {
+      user.emailVerified = true;
+      await user.save();
+    }
+
     res.json({
       success: true,
       message: 'Code verified successfully'
